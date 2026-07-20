@@ -1,4 +1,4 @@
-#!/bin/bash
+cd frontend && npm run dev#!/bin/bash
 # 启动 TripPlanner 后端 + 前端 Vue dev server
 set -e
 

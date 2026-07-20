@@ -7,7 +7,7 @@
 
     <div class="container">
       <h1>🧳 TripPlanner</h1>
-      <p class="subtitle">5 Node LangGraph · SSE 实时进度 · 8 维用户画像</p>
+      <p class="subtitle">5 Node LangGraph · 轮询进度 · 8 维用户画像</p>
 
       <!-- 画像面板 -->
       <div class="glass-card" v-if="!planning">
@@ -128,17 +128,16 @@ const profile = ref({ ready: false, trip_count: 0 })
 // ── 流动文案状态机 ──
 const flowState = reactive({
   attraction: 'pending', weather: 'pending', hotel: 'pending',
-  memory: 'pending', planner: 'pending', connected: 'pending'
+  memory: 'pending', planner: 'pending'
 })
 
 // 每个阶段的文案模板 — 带入真实城市名
 const stageMessages = {
-  connected:  { start: (city) => `🔗 正在连接服务器...`, done: null },
-  attraction: { start: (city) => `📍 正在搜索${city}的景点...`,  done: (city) => `✅ 景点搜索完成`, failed: (city) => `⚠️ 景点搜索失败，使用降级数据` },
-  weather:    { start: (city) => `🌤 正在查询${city}天气...`,  done: (city) => `✅ 天气获取完成`, failed: (city) => `⚠️ 天气查询失败，使用降级数据` },
-  hotel:      { start: (city) => `🏨 正在搜索${city}酒店...`,  done: (city) => `✅ 酒店搜索完成`, failed: (city) => `⚠️ 酒店搜索失败，使用降级数据` },
-  memory:     { start: (city) => `🧠 正在加载用户画像...`,    done: (city) => `✅ 画像加载完成` },
-  planner:    { start: (city) => `📋 正在生成${city}旅行计划...`, done: (city) => `🎉 计划生成完毕！` },
+  attraction: { start: (city) => `📍 搜索景点中...`,  done: (city) => `✅ 景点搜索完成`, failed: (city) => `⚠️ 景点搜索失败，使用降级数据` },
+  weather:    { start: (city) => `🌤 天气查询中...`,  done: (city) => `✅ 天气完成`, failed: (city) => `⚠️ 天气查询失败，使用降级数据` },
+  hotel:      { start: (city) => `🏨 酒店搜索中...`,  done: (city) => `✅ 酒店完成`, failed: (city) => `⚠️ 酒店搜索失败，使用降级数据` },
+  memory:     { start: (city) => `🧠 加载画像...`,    done: (city) => `✅ 画像加载完成` },
+  planner:    { start: (city) => `📋 规划行程中...`, done: (city) => `✅ 行程生成完毕` },
 }
 
 // 计算当前应显示的文案序列
@@ -190,38 +189,87 @@ async function startPlan() {
   planning.value = true; result.value = null; errors.value = []; progressPct.value = 0
   // 重置流动状态
   Object.keys(flowState).forEach(k => flowState[k] = 'pending')
-  
-  const params = new URLSearchParams({ city: form.city, days: form.days, origin: form.origin, start_date: form.startDate, transport_mode: form.transportMode, preferences: form.prefs.join(',') })
-  const es = new EventSource(`${API}/api/trip/stream?${params}`)
-  
-  es.onmessage = (e) => {
-    const d = JSON.parse(e.data)
-    
-    if (d.status === 'start') {
-      flowState[d.node] = 'active'
-      progressPct.value = ((nodeOrder.indexOf(d.node)) / nodeOrder.length) * 80
-    } else if (d.status === 'done') {
-      if (d.data?.status === 'failed') {
-        flowState[d.node] = 'failed'
-      } else {
-        flowState[d.node] = 'done'
-      }
-      progressPct.value = ((nodeOrder.indexOf(d.node) + 1) / nodeOrder.length) * 80
-    } else if (d.status === 'ok' && d.node === 'connected') {
-      flowState.connected = 'done'
-    } else if (d.status === 'complete') {
-      result.value = d.data; errors.value = d.data.errors || []
-      progressPct.value = 100
-      // 确保所有状态标记为完成
-      nodeOrder.forEach(n => { if (flowState[n] === 'active') flowState[n] = 'done' })
-      setTimeout(() => { planning.value = false }, 800)
-      es.close(); loadProfile()
-    } else if (d.status === 'error') {
-      errors.value = [d.data?.message || '未知错误']; planning.value = false; es.close()
+
+  // 第一个阶段立即显示
+  flowState.attraction = 'active'
+
+  // 发起 POST 请求（不阻塞动画）
+  const fetchPromise = fetch(`${API}/api/trip`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      origin: form.origin,
+      city: form.city,
+      days: form.days,
+      start_date: form.startDate,
+      transport_mode: form.transportMode,
+      preferences: form.prefs,
+    })
+  })
+
+  let completed = false
+  let step = 0
+
+  // 定时器模拟进度动画：每 1.5 秒跳一步
+  const interval = setInterval(() => {
+    if (completed) return
+    step++
+
+    switch (step) {
+      case 1:
+        progressPct.value = 20
+        flowState.attraction = 'done'
+        flowState.weather = 'active'
+        break
+      case 2:
+        progressPct.value = 40
+        flowState.weather = 'done'
+        flowState.hotel = 'active'
+        break
+      case 3:
+        progressPct.value = 60
+        flowState.hotel = 'done'
+        flowState.memory = 'active'
+        break
+      case 4:
+        progressPct.value = 80
+        flowState.memory = 'done'
+        flowState.planner = 'active'
+        break
+      case 5:
+        progressPct.value = 100
+        // 到达 100% 但不标记 planner 完成 — 等 fetch 返回
+        break
     }
+  }, 1500)
+
+  try {
+    const response = await fetchPromise
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+
+    completed = true
+    clearInterval(interval)
+
+    // 全部标记完成
+    nodeOrder.forEach(n => { flowState[n] = 'done' })
+    progressPct.value = 100
+
+    // 映射后端字段到前端格式
+    result.value = {
+      ...data,
+      intercity: data.intercity_transport || null,
+    }
+    errors.value = data.errors || []
+
+    setTimeout(() => { planning.value = false }, 800)
+    loadProfile()
+  } catch (e) {
+    completed = true
+    clearInterval(interval)
+    errors.value = [`请求失败: ${e.message}`]
+    planning.value = false
   }
-  
-  es.onerror = () => { if (planning.value) { errors.value = ['SSE 连接中断']; planning.value = false } es.close() }
 }
 
 const nodeOrder = ['attraction', 'weather', 'hotel', 'memory', 'planner']
