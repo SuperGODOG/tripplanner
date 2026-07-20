@@ -183,6 +183,8 @@ class AmapToolWrapper(Tool):
     # ================================================================
 
     def _extract_json(self, raw: Any) -> dict | None:
+        if isinstance(raw, dict):
+            return raw
         s = str(raw)
         try:
             return json.loads(s)

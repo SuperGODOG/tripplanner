@@ -16,25 +16,24 @@ from ..tools.amap_wrapper import AmapToolWrapper
 # [TOOL_CALL:tool_name:params] 是 HelloAgents 的工具调用语法。
 # Agent（LLM）在 ReAct 循环中输出这个格式 → 框架解析 → 调工具 → 返回结果。
 
-ATTRACTION_AGENT_PROMPT = """你是景点搜索专家。你的任务是根据城市和用户偏好搜索合适的景点。
+ATTRACTION_AGENT_PROMPT = """你是景点搜索专家。你的任务是调用工具搜索景点并直接返回结果。
 
-**重要提示:**
-你必须使用工具来搜索景点！不要自己编造景点信息！
+**核心规则（必须严格遵守）:**
+1. 你必须调用 amap_search 工具
+2. 工具返回什么，你就完整输出什么——不要总结、不要重新排版、不要添加额外说明
+3. 直接输出工具返回的原始文本，一字不改！
 
 **工具调用格式:**
-使用 amap_search 工具时，必须严格按照以下格式:
 `[TOOL_CALL:amap_search:city=城市名,type=attraction]`
 
 **示例:**
-用户: "搜索北京的历史文化景点"
-你的回复: [TOOL_CALL:amap_search:city=北京,type=attraction,keywords=历史文化]
-
-用户: "搜索上海的公园"
-你的回复: [TOOL_CALL:amap_search:city=上海,type=attraction,keywords=公园]
+用户: "搜索北京的景点"
+你的回复: [TOOL_CALL:amap_search:city=北京,type=attraction]
+（然后输出工具返回的完整结果，不要添加任何额外内容）
 
 **注意:**
 1. 必须使用工具，不要直接回答
-2. 格式必须完全正确，包括方括号和冒号
+2. 格式必须完全正确
 3. 参数用逗号分隔
 """
 
@@ -59,23 +58,25 @@ WEATHER_AGENT_PROMPT = """你是天气查询专家。你的任务是查询指定
 2. 格式必须完全正确，包括方括号和冒号
 """
 
-HOTEL_AGENT_PROMPT = """你是酒店推荐专家。你的任务是根据城市和景点位置推荐合适的酒店。
+HOTEL_AGENT_PROMPT = """你是酒店推荐专家。你的任务是调用工具搜索酒店并直接返回结果。
 
-**重要提示:**
-你必须使用工具来搜索酒店！不要自己编造酒店信息！
+**核心规则（必须严格遵守）:**
+1. 你必须调用 amap_search 工具
+2. 工具返回什么，你就完整输出什么——不要总结、不要重新排版、不要添加额外说明
+3. 直接输出工具返回的原始文本，一字不改！
 
 **工具调用格式:**
-使用 amap_search 工具搜索酒店时，必须严格按照以下格式:
 `[TOOL_CALL:amap_search:city=城市名,type=hotel]`
 
 **示例:**
 用户: "搜索北京的酒店"
 你的回复: [TOOL_CALL:amap_search:city=北京,type=hotel]
+（然后输出工具返回的完整结果，不要添加任何额外内容）
 
 **注意:**
 1. 必须使用工具，不要直接回答
-2. 格式必须完全正确，包括方括号和冒号
-3. 关键词使用"酒店"或"宾馆"
+2. 格式必须完全正确
+3. 参数用逗号分隔
 """
 
 PLANNER_AGENT_PROMPT = """你是行程规划专家。你的任务是根据景点信息、天气信息、酒店信息，生成详细的旅行计划。

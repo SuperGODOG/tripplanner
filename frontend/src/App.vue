@@ -182,7 +182,8 @@ const weatherIcons = { '晴': '☀️', '多云': '⛅', '阴': '☁️', '雨':
 function toggle(v) { const i = form.prefs.indexOf(v); i >= 0 ? form.prefs.splice(i, 1) : form.prefs.push(v) }
 
 onMounted(async () => {
-  form.startDate = new Date().toISOString().slice(0, 10)
+  const today = new Date();
+  form.startDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   try { const r = await fetch(`${API}/api/profile`); profile.value = await r.json() } catch {}
 })
 
