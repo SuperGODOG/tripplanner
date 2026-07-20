@@ -2,6 +2,7 @@
 import re, traceback
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from ..models.schemas import TripRequest, TripPlan, IntercityTransport
 from ..graph.builder import get_trip_graph
 from ..memory.manager import get_memory
@@ -78,6 +79,89 @@ async def plan_trip(request: TripRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/trip/stream")
+async def plan_trip_stream(
+    city: str, days: int = 3,
+    origin: str = "", start_date: str = "",
+    transport_mode: str = "高铁",
+    preferences: str = "",  # comma-separated
+):
+    """SSE 流式端点——前端实时看到每个 Node 进度"""
+    import json, asyncio
+    from ..graph.events import SSEEmitter
+    from ..graph.nodes import set_emitter
+
+    emitter = SSEEmitter()
+
+    async def event_stream():
+        try:
+            # 准备 state（复用同步 API 的逻辑）
+            prefs = [p.strip() for p in preferences.split(",") if p.strip()]
+            start = start_date or date.today().isoformat()
+            date_list = [(date.fromisoformat(start) + timedelta(days=i)).isoformat() for i in range(days)]
+            intercity, ic_error = _compute_intercity(origin, city, transport_mode) if origin else (None, None)
+
+            memory = get_memory()
+            memory.add(f"目的地: {city}", "observe")
+            if origin: memory.add(f"出发地: {origin}", "observe")
+            memory.add(f"出行方式: {transport_mode}", "observe")
+            for p in prefs: memory.add(f"偏好: {p}", "observe")
+            if intercity and intercity.distance_category:
+                memory.add(f"距离分类: {intercity.distance_category}", "observe")
+            memory.trip_count += 1
+            memory._save()
+
+            state = {
+                "origin": origin, "city": city, "days": days,
+                "start_date": start, "date_list": date_list,
+                "transport_mode": transport_mode, "preferences": prefs,
+                "intercity_distance_km": intercity.distance_km if intercity else 0,
+                "intercity_duration_h": intercity.duration_hours if intercity else 0,
+                "intercity_cost": intercity.estimated_cost if intercity else 0,
+                "distance_category": intercity.distance_category if intercity else "",
+                "attraction_data": "", "weather_data": "", "hotel_data": "",
+                "attraction_status": "", "weather_status": "", "hotel_status": "",
+                "final_plan": {}, "error_log": [], "user_profile": {},
+            }
+
+            # 注入 emitter
+            set_emitter(emitter)
+
+            # 在线程中跑 graph（不阻塞 async loop）
+            graph = get_trip_graph()
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: graph.invoke(state))
+            set_emitter(None)
+
+            # 最终结果
+            plan_data = result.get("final_plan", {})
+            errors = result.get("error_log", [])
+            emitter.emit("done", "complete", {
+                "city": plan_data.get("city", city),
+                "days": plan_data.get("days", []),
+                "weather_info": plan_data.get("weather_info", []),
+                "overall_suggestions": plan_data.get("overall_suggestions", ""),
+                "budget": plan_data.get("budget", {}),
+                "intercity": {
+                    "mode": transport_mode,
+                    "distance_km": intercity.distance_km if intercity else 0,
+                    "distance_category": intercity.distance_category if intercity else "",
+                    "estimated_cost": intercity.estimated_cost if intercity else 0,
+                    "duration_hours": intercity.duration_hours if intercity else 0,
+                } if intercity else None,
+                "is_fallback": plan_data.get("status") == "fallback" or len(errors) > 0,
+                "errors": errors,
+            })
+        except Exception as e:
+            emitter.emit("error", "error", {"message": str(e)})
+
+        # yield 所有事件
+        async for msg in emitter.stream():
+            yield msg
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # ── 城际交通计算（纯 API + 本地计算，不占图 Node） ──
