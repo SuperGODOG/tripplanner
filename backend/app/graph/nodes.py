@@ -23,7 +23,19 @@ def attraction_node(state: TripPlannerState) -> dict:
             f"[TOOL_CALL:amap_maps_text_search:keywords={kw},city={city}]"
         )
         _emit("attraction", "done", {"status": "success"})
-        return {"attraction_data": result, "attraction_status": "success"}
+
+        # ── 计算景点群物理中心（本地 Python，不交 LLM）──
+        import re
+        coords = re.findall(r"📍\(([\d.]+),([\d.]+)\)", result)
+        parsed = [{"name": "?", "lng": float(c[0]), "lat": float(c[1])} for c in coords]
+        center = {}
+        if parsed:
+            clng = sum(p["lng"] for p in parsed) / len(parsed)
+            clat = sum(p["lat"] for p in parsed) / len(parsed)
+            center = {"center_lng": round(clng, 6), "center_lat": round(clat, 6),
+                      "attraction_coords": parsed}
+
+        return {"attraction_data": result, "attraction_status": "success", **center}
     except Exception as e:
         _emit("attraction", "done", {"status": "failed"})
         return {"attraction_data": "", "attraction_status": "failed",
@@ -51,9 +63,19 @@ def hotel_node(state: TripPlannerState) -> dict:
     city = state["city"]
     try:
         planner = get_planner()
-        result = planner.hotel_agent.run(
-            f"请搜索{city}的酒店。\n[TOOL_CALL:amap_maps_text_search:keywords=酒店,city={city}]"
-        )
+        clng = state.get("center_lng")
+        clat = state.get("center_lat")
+        if clng and clat:
+            # 有景点中心 → 周边搜酒店
+            result = planner.hotel_agent.run(
+                f"请以坐标({clng},{clat})为中心搜索{city}的酒店。\n"
+                f"[TOOL_CALL:amap_search:city={city},type=around,center={clng},{clat},keywords=酒店]"
+            )
+        else:
+            # 退化为全城搜索
+            result = planner.hotel_agent.run(
+                f"请搜索{city}的酒店。\n[TOOL_CALL:amap_maps_text_search:keywords=酒店,city={city}]"
+            )
         _emit("hotel", "done", {"status": "success"})
         return {"hotel_data": result, "hotel_status": "success"}
     except Exception as e:

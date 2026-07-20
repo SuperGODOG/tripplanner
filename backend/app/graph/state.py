@@ -24,6 +24,11 @@ class TripPlannerState(TypedDict, total=False):
     weather_data: str
     hotel_data: str
 
+    # ── 空间计算（attraction_node 产出）──
+    center_lng: float             # 景点群物理中心经度
+    center_lat: float             # 景点群物理中心纬度
+    attraction_coords: list       # [{name, lng, lat}, ...]
+
     # ── 状态标记 ──
     attraction_status: str
     weather_status: str

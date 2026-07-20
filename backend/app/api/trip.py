@@ -54,7 +54,7 @@ async def plan_trip(request: TripRequest):
             "intercity_duration_h": intercity.duration_hours if intercity else 0,
             "intercity_cost": intercity.estimated_cost if intercity else 0,
             "distance_category": intercity.distance_category if intercity else "",
-            "attraction_data": "", "weather_data": "", "hotel_data": "",
+            "attraction_data": "", "weather_data": "", "hotel_data": "", "center_lng": 0, "center_lat": 0, "attraction_coords": [],
             "attraction_status": "", "weather_status": "", "hotel_status": "",
             "final_plan": {}, "error_log": [ic_error] if ic_error else [],
             "user_profile": {},
@@ -118,7 +118,7 @@ async def plan_trip_stream(
                 "intercity_duration_h": intercity.duration_hours if intercity else 0,
                 "intercity_cost": intercity.estimated_cost if intercity else 0,
                 "distance_category": intercity.distance_category if intercity else "",
-                "attraction_data": "", "weather_data": "", "hotel_data": "",
+                "attraction_data": "", "weather_data": "", "hotel_data": "", "center_lng": 0, "center_lat": 0, "attraction_coords": [],
                 "attraction_status": "", "weather_status": "", "hotel_status": "",
                 "final_plan": {}, "error_log": [], "user_profile": {},
             }
