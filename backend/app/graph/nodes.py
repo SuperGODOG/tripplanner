@@ -18,10 +18,36 @@ def attraction_node(state: TripPlannerState) -> dict:
     try:
         planner = get_planner()
         kw = prefs[0] if prefs else "景点"
-        result = planner.attraction_agent.run(
-            f"请搜索{city}的{kw}相关景点。\n"
-            f"[TOOL_CALL:amap_search:city={city},type=attraction,keywords={kw}]"
-        )
+
+        # ── 获取城市中心坐标（maps_geo）──
+        import re
+        from ..services.amap_service import get_amap_mcp_tool
+        mcp = get_amap_mcp_tool()
+        center_lng = center_lat = None
+        try:
+            geo_result = mcp.run({
+                "action": "call_tool", "tool_name": "maps_geo",
+                "arguments": {"address": city},
+            })
+            geo_match = re.search(r'"location"\s*:\s*"([\d.]+),([\d.]+)"', str(geo_result))
+            if geo_match:
+                center_lng, center_lat = geo_match.group(1), geo_match.group(2)
+        except Exception:
+            pass
+
+        if center_lng and center_lat:
+            center = f"{center_lng},{center_lat}"
+            print(f"🗺️  [景点搜索] 城市中心 ({center_lng},{center_lat})，使用 maps_around radius=20km")
+            result = planner.attraction_agent.run(
+                f"请搜索{city}的{kw}相关景点。\n"
+                f"[TOOL_CALL:amap_search:city={city},type=around,keywords={kw},center={center},radius=20000]"
+            )
+        else:
+            print(f"⚠️  [景点搜索] maps_geo 失败，退化全城 text_search")
+            result = planner.attraction_agent.run(
+                f"请搜索{city}的{kw}相关景点。\n"
+                f"[TOOL_CALL:amap_search:city={city},type=attraction,keywords={kw}]"
+            )
         _emit("attraction", "done", {"status": "success"})
 
         # ── 计算景点群物理中心（本地 Python，不交 LLM）──
@@ -93,6 +119,7 @@ MAX_HOTEL_RETRY = 2          # 酒店回环最大次数（离群重算）
 OUTLIER_SIGMA = 1.5           # 离群阈值（标准差倍数）：距离 > mean + k*sigma → 离群
 MAX_HOTEL_DIST_KM = 10      # 酒店到最远景点距离阈值（软伤）
 BUDGET_OVER_PCT = 0.3       # 预算超用户偏好 30%（硬伤）
+MAX_ATTRACTION_RANGE_KM = 80   # 景点硬上限：超过此距离直接排除（非城市景点）
 
 
 def _haversine_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
@@ -201,33 +228,50 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
             d = _haversine_km(orig_clng, orig_clat, c["lng"], c["lat"])
             dists.append(d)
 
-        avg_dist = sum(dists) / len(dists) if dists else 0
-
-        # 标准差
-        n = len(dists)
-        if n > 1:
-            variance = sum((d - avg_dist) ** 2 for d in dists) / n
-            sigma = variance ** 0.5
-        else:
-            sigma = 0
-
-        # 阈值 = mean + k * sigma（容忍大部分城市内部差异）
-        threshold = avg_dist + OUTLIER_SIGMA * sigma if sigma > 0 else avg_dist * 2
-
-        # 汇总：打印距离分布方便调试
-        print(f"  📏 景点距离: avg={avg_dist:.1f}km sigma={sigma:.1f}km threshold={threshold:.1f}km")
-        for i, d in enumerate(dists[:5]):
-            flag = " ← 离群" if d > threshold else ""
-            print(f"     {coords[i].get('name','?')}: {d:.1f}km{flag}")
-
-        # 标记离群
-        inliers = []
+        # ── 第一轮：硬上限检测（>MAX_ATTRACTION_RANGE_KM 直接排除）──
+        hard_outliers = []
+        remaining_coords = []
+        remaining_dists = []
         for i, c in enumerate(coords):
-            if dists[i] > threshold:
-                name = c.get("name", f"景点{i}")
-                outlier_names.append(name)
+            if dists[i] > MAX_ATTRACTION_RANGE_KM:
+                hard_outliers.append((i, c, dists[i]))
             else:
-                inliers.append(c)
+                remaining_coords.append(c)
+                remaining_dists.append(dists[i])
+
+        if hard_outliers:
+            for _, c, d in hard_outliers:
+                name = c.get("name", "?")
+                outlier_names.append(name)
+                print(f"     {name}: {d:.1f}km ← 硬上限排除 (>{MAX_ATTRACTION_RANGE_KM}km)")
+
+        # ── 第二轮：标准差离群检测（仅对剩余景点）──
+        if remaining_dists:
+            avg_dist = sum(remaining_dists) / len(remaining_dists)
+            n = len(remaining_dists)
+            if n > 1:
+                variance = sum((d - avg_dist) ** 2 for d in remaining_dists) / n
+                sigma = variance ** 0.5
+            else:
+                sigma = 0
+
+            threshold = avg_dist + OUTLIER_SIGMA * sigma if sigma > 0 else avg_dist * 2
+
+            print(f"  📏 景点距离: avg={avg_dist:.1f}km sigma={sigma:.1f}km threshold={threshold:.1f}km")
+            for i, d in enumerate(remaining_dists[:5]):
+                flag = " ← 离群" if d > threshold else ""
+                print(f"     {remaining_coords[i].get('name','?')}: {d:.1f}km{flag}")
+
+            # 标记标准差离群
+            inliers = []
+            for i, c in enumerate(remaining_coords):
+                if remaining_dists[i] > threshold:
+                    name = c.get("name", f"景点{i}")
+                    outlier_names.append(name)
+                else:
+                    inliers.append(c)
+        else:
+            inliers = []
 
         # 去掉离群景点重新算中心
         if outlier_names and inliers:

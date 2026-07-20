@@ -37,6 +37,8 @@ class AmapToolWrapper(Tool):
             ToolParameter(name="keywords", type="string", description="额外关键词", required=False),
             ToolParameter(name="center", type="string",
                           description="周边搜索中心坐标 lng,lat（仅 type=around 时使用）", required=False),
+            ToolParameter(name="radius", type="string",
+                          description="周边搜索半径（米），仅 type=around 时使用，默认 5000", required=False),
         ]
 
     # ================================================================
@@ -48,9 +50,10 @@ class AmapToolWrapper(Tool):
         stype = parameters["type"]
         kw = parameters.get("keywords", "")
         center = parameters.get("center", "")
+        radius = parameters.get("radius", "")
 
         # ── 第 1 层: MCP 调用 ──
-        raw = self._call_mcp(city, stype, kw, center)
+        raw = self._call_mcp(city, stype, kw, center, radius)
 
         # ── 第 1.5 层: 坐标增强（仅 POI 类，条件触发）──
         if stype in ("attraction", "hotel"):
@@ -66,7 +69,7 @@ class AmapToolWrapper(Tool):
     # 第 1 层: MCP 调用
     # ================================================================
 
-    def _call_mcp(self, city: str, stype: str, kw: str, center: str) -> Any:
+    def _call_mcp(self, city: str, stype: str, kw: str, center: str, radius: str = "") -> Any:
         if stype == "weather":
             return self._mcp.run({
                 "action": "call_tool", "tool_name": "maps_weather",
@@ -75,7 +78,7 @@ class AmapToolWrapper(Tool):
         if stype == "around" and center:
             return self._mcp.run({
                 "action": "call_tool", "tool_name": "maps_around",
-                "arguments": {"location": center, "keywords": kw or "酒店", "radius": "5000"},
+                "arguments": {"location": center, "keywords": kw or "酒店", "radius": radius or "5000"},
             })
         return self._mcp.run({
             "action": "call_tool", "tool_name": "maps_text_search",
@@ -162,6 +165,8 @@ class AmapToolWrapper(Tool):
                 parts.append(poi["address"])
             if poi.get("_lng") and poi.get("_lat"):
                 parts.append(f"📍({poi['_lng']},{poi['_lat']})")
+            elif poi.get("location"):
+                parts.append(f"📍({poi['location']})")
             lines.append(" | ".join(parts))
 
         return "\n".join(lines)
