@@ -206,7 +206,7 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
         # 标记离群
         inliers = []
         for i, c in enumerate(coords):
-            if dists[i] > threshold or dists[i] > avg_dist * OUTLIER_DIST_FACTOR:
+            if dists[i] > threshold:
                 name = c.get("name", f"景点{i}")
                 outlier_names.append(name)
             else:
@@ -228,6 +228,11 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
             "planner_retry_count": retry_count + 1,
         }
 
+    # 重试次数耗尽 → 硬伤降级为软伤，强制 done
+    exhausted = hard_errors and retry_count >= MAX_RETRY
+    if exhausted:
+        error_log.append(f"硬伤（重试{MAX_RETRY}次仍失败）: {'; '.join(hard_errors)}")
+
     result: dict = {
         "planner_route": "done",
         "planner_retry_count": retry_count,
@@ -240,8 +245,8 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
         else:
             result["error_log"] = error_log
 
-    # 如果有离群景点 → 写入 override 并触发 retry_hotel
-    if override_lng is not None and override_lat is not None:
+    # 离群景点 → 写入 override 并触发 retry_hotel（exhausted 时不触发）
+    if not exhausted and override_lng is not None and override_lat is not None:
         result["center_lng_override"] = override_lng
         result["center_lat_override"] = override_lat
         result["planner_route"] = "retry_hotel"
