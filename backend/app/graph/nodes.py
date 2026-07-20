@@ -20,7 +20,7 @@ def attraction_node(state: TripPlannerState) -> dict:
         kw = prefs[0] if prefs else "景点"
         result = planner.attraction_agent.run(
             f"请搜索{city}的{kw}相关景点。\n"
-            f"[TOOL_CALL:amap_maps_text_search:keywords={kw},city={city}]"
+            f"[TOOL_CALL:amap_search:city={city},type=attraction,keywords={kw}]"
         )
         _emit("attraction", "done", {"status": "success"})
 
@@ -65,7 +65,7 @@ def hotel_node(state: TripPlannerState) -> dict:
             # 退化为全城搜索
             print(f"🏨 [酒店搜索] 无中心坐标，退化为全城搜索")
             result = planner.hotel_agent.run(
-                f"请搜索{city}的酒店。\n[TOOL_CALL:amap_maps_text_search:keywords=酒店,city={city}]"
+                f"请搜索{city}的酒店。\n[TOOL_CALL:amap_search:city={city},type=hotel]"
             )
         _emit("hotel", "done", {"status": "success"})
         return {"hotel_data": result, "hotel_status": "success"}
