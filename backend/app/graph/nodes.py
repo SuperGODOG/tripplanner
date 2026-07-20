@@ -89,6 +89,7 @@ def memory_node(state: TripPlannerState) -> dict:
 
 # ── 常量 ──
 MAX_RETRY = 3               # Planner 自回环最大次数
+MAX_HOTEL_RETRY = 2          # 酒店回环最大次数（离群重算）
 OUTLIER_DIST_FACTOR = 2.0   # 离群距离 > 平均值 * 这个因子 → 标记为离群
 MAX_HOTEL_DIST_KM = 10      # 酒店到最远景点距离阈值（软伤）
 BUDGET_OVER_PCT = 0.3       # 预算超用户偏好 30%（硬伤）
@@ -245,11 +246,16 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
         else:
             result["error_log"] = error_log
 
-    # 离群景点 → 写入 override 并触发 retry_hotel（exhausted 时不触发）
-    if not exhausted and override_lng is not None and override_lat is not None:
+    # ── 酒店重试上限 ──
+    hotel_retry_count = state.get("hotel_retry_count", 0)
+    hotel_exhausted = hotel_retry_count >= MAX_HOTEL_RETRY
+
+    # 离群景点 → 写入 override 并触发 retry_hotel
+    if not exhausted and not hotel_exhausted and override_lng is not None and override_lat is not None:
         result["center_lng_override"] = override_lng
         result["center_lat_override"] = override_lat
         result["planner_route"] = "retry_hotel"
+        result["hotel_retry_count"] = hotel_retry_count + 1
 
     return result
 

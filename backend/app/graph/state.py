@@ -33,6 +33,10 @@ class TripPlannerState(TypedDict, total=False):
     center_lng_override: float    # 去掉离群景点后新中心经度
     center_lat_override: float    # 去掉离群景点后新中心纬度
 
+    # ── 重试计数器 ──
+    planner_retry_count: int      # Planner 自回环计数
+    hotel_retry_count: int        # Hotel 回环计数（离群重算）
+
     # ── 状态标记 ──
     attraction_status: str
     weather_status: str
