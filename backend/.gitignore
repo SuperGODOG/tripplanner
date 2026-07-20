@@ -7,7 +7,3 @@ venv/
 
 # 记忆数据
 data/
-
-# IDE
-.vscode/
-.idea/
