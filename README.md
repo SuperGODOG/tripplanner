@@ -1,6 +1,7 @@
 # 🧳 TripPlanner
 
-> 多智能体旅行规划系统 — 5 Node LangGraph + MCP + 双轨异常检测画像
+> 基于 LangGraph + ReAct 自研编排的多智能体旅行规划系统
+> 5 Node StateGraph · MCP 协议 · 五因子权重记忆 · 双轨异常检测
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.2-purple)](https://langchain-ai.github.io/langgraph/)
