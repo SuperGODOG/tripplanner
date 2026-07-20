@@ -34,6 +34,10 @@ class TripPlannerState(TypedDict, total=False):
     weather_status: str
     hotel_status: str
 
+    # ── Planner 回环控制 ──
+    planner_route: str                 # "done" / "retry_planner" / "retry_hotel"
+    planner_retry_count: int           # Planner 重试计数（最多 3 次）
+
     # ── 最终输出 ──
     final_plan: dict
 

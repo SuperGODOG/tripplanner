@@ -3,7 +3,7 @@
 Phase 3 核心概念 #3: Graph + Edge + Conditional Routing
 
 图结构:
-  START → attraction → weather → hotel → memory → planner → END
+  START → attraction → hotel → memory → planner → END
                 ↓          ↓         ↓
               每个 Node 返回 status，决定下游行为
               (Phase 3 先做 linear，conditional edge 在 Phase 4 基础上加)
@@ -18,7 +18,7 @@ Phase 3 核心概念 #4: Checkpoint
 """
 from langgraph.graph import StateGraph, END
 from .state import TripPlannerState
-from .nodes import attraction_node, weather_node, hotel_node, memory_node, planner_node
+from .nodes import attraction_node, hotel_node, memory_node, planner_node
 
 
 def build_trip_graph() -> StateGraph:
@@ -35,11 +35,11 @@ def build_trip_graph() -> StateGraph:
     └────┬─────┘
          │
     ┌────▼─────┐
-    │  weather  │──成功/失败──→
+    │   hotel   │──成功/失败──→
     └────┬─────┘
          │
     ┌────▼─────┐
-    │   hotel   │──成功/失败──→
+    │  memory   │
     └────┬─────┘
          │
     ┌────▼─────┐
@@ -56,7 +56,6 @@ def build_trip_graph() -> StateGraph:
 
     # 2. 注册 Node
     graph.add_node("attraction", attraction_node)
-    graph.add_node("weather", weather_node)
     graph.add_node("hotel", hotel_node)
     graph.add_node("memory", memory_node)
     graph.add_node("planner", planner_node)
@@ -64,9 +63,8 @@ def build_trip_graph() -> StateGraph:
     # 3. 设定入口
     graph.set_entry_point("attraction")
 
-    # 4. Edge: attraction → weather → hotel → memory → planner
-    graph.add_edge("attraction", "weather")
-    graph.add_edge("weather", "hotel")
+    # 4. Edge: attraction → hotel → memory → planner
+    graph.add_edge("attraction", "hotel")
     graph.add_edge("hotel", "memory")       # 酒店 → 记忆加载
     graph.add_edge("memory", "planner")     # 记忆 → 规划（画像已注入 State）
     graph.add_edge("planner", END)

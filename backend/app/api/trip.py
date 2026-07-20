@@ -1,5 +1,5 @@
 """旅行规划 API"""
-import re, traceback
+import json, re, traceback
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -30,6 +30,9 @@ async def plan_trip(request: TripRequest):
         # ── 城际交通计算（API 层，不占 LangGraph Node） ──
         intercity, ic_error = _compute_intercity(request.origin, request.city, request.transport_mode) if request.origin else (None, None)
 
+        # ── 天气查询（API 层，不占 LangGraph Node） ──
+        weather_data, weather_status, weather_error = _fetch_weather(request.city)
+
         # 写入记忆
         memory.add(f"目的地: {request.city}", "observe")
         if request.origin:
@@ -41,6 +44,10 @@ async def plan_trip(request: TripRequest):
             memory.add(f"距离分类: {intercity.distance_category}", "observe")
         memory.trip_count += 1
         memory._save()
+
+        errors_init = [ic_error] if ic_error else []
+        if weather_error:
+            errors_init.append(weather_error)
 
         state = {
             "origin": request.origin,
@@ -54,9 +61,9 @@ async def plan_trip(request: TripRequest):
             "intercity_duration_h": intercity.duration_hours if intercity else 0,
             "intercity_cost": intercity.estimated_cost if intercity else 0,
             "distance_category": intercity.distance_category if intercity else "",
-            "attraction_data": "", "weather_data": "", "hotel_data": "", "center_lng": 0, "center_lat": 0, "attraction_coords": [],
-            "attraction_status": "", "weather_status": "", "hotel_status": "",
-            "final_plan": {}, "error_log": [ic_error] if ic_error else [],
+            "attraction_data": "", "weather_data": weather_data, "hotel_data": "", "center_lng": 0, "center_lat": 0, "attraction_coords": [],
+            "attraction_status": "", "weather_status": weather_status, "hotel_status": "",
+            "final_plan": {}, "error_log": errors_init,
             "user_profile": {},
         }
 
@@ -101,6 +108,7 @@ async def plan_trip_stream(
             start = start_date or date.today().isoformat()
             date_list = [(date.fromisoformat(start) + timedelta(days=i)).isoformat() for i in range(days)]
             intercity, ic_error = _compute_intercity(origin, city, transport_mode) if origin else (None, None)
+            weather_data, weather_status, weather_error = _fetch_weather(city)
 
             memory = get_memory()
             memory.add(f"目的地: {city}", "observe")
@@ -110,6 +118,10 @@ async def plan_trip_stream(
             if intercity and intercity.distance_category: memory.add(f"距离分类: {intercity.distance_category}", "observe")
             memory.trip_count += 1; memory._save()
 
+            errors_init = [ic_error] if ic_error else []
+            if weather_error:
+                errors_init.append(weather_error)
+
             state = {
                 "origin": origin, "city": city, "days": days,
                 "start_date": start, "date_list": date_list,
@@ -118,9 +130,9 @@ async def plan_trip_stream(
                 "intercity_duration_h": intercity.duration_hours if intercity else 0,
                 "intercity_cost": intercity.estimated_cost if intercity else 0,
                 "distance_category": intercity.distance_category if intercity else "",
-                "attraction_data": "", "weather_data": "", "hotel_data": "", "center_lng": 0, "center_lat": 0, "attraction_coords": [],
-                "attraction_status": "", "weather_status": "", "hotel_status": "",
-                "final_plan": {}, "error_log": [], "user_profile": {},
+                "attraction_data": "", "weather_data": weather_data, "hotel_data": "", "center_lng": 0, "center_lat": 0, "attraction_coords": [],
+                "attraction_status": "", "weather_status": weather_status, "hotel_status": "",
+                "final_plan": {}, "error_log": errors_init, "user_profile": {},
             }
 
             # 发送连接成功事件
@@ -197,6 +209,71 @@ async def plan_trip_stream(
             "Connection": "keep-alive",
         }
     )
+
+
+# ── 天气查询（API 层直接调 MCP，不占图 Node） ──
+
+def _fetch_weather(city: str) -> tuple[str, str, str | None]:
+    """直接调用 maps_weather 获取天气数据，格式化后写入 state。
+    返回 (weather_data, weather_status, error_msg_or_None)
+    """
+    from ..services.amap_service import get_amap_mcp_tool
+
+    try:
+        mcp = get_amap_mcp_tool()
+        raw = mcp.run({
+            "action": "call_tool",
+            "tool_name": "maps_weather",
+            "arguments": {"city": city},
+        })
+
+        # 解析 JSON 响应
+        s = str(raw)
+        data = None
+        try:
+            data = json.loads(s)
+        except json.JSONDecodeError:
+            m = re.match(r"工具\s+'[^']*'\s+执行结果:\s*\n", s)
+            if m:
+                try:
+                    data = json.loads(s[m.end():])
+                except json.JSONDecodeError:
+                    pass
+
+        if data:
+            lines = ["【天气信息】"]
+            forecasts = data.get("forecasts", []) if isinstance(data, dict) else []
+            if not forecasts and isinstance(data, list):
+                forecasts = data
+            for f in forecasts[:7]:
+                if isinstance(f, dict):
+                    date = f.get("date", "未知")
+                    dw = f.get("dayweather", "?")
+                    nw = f.get("nightweather", "?")
+                    dt = f.get("daytemp", "?")
+                    nt = f.get("nighttemp", "?")
+                    w = f.get("daywind", "?")
+                    lines.append(f"- {date}: {dw}转{nw}, {dt}°C~{nt}°C, {w}风")
+                else:
+                    lines.append(f"- {f}")
+            weather_data = "\n".join(lines) if len(lines) > 1 else str(data)
+        else:
+            weather_data = _weather_fallback(city)
+            print(f"  ⚠️ 天气查询: 解析响应失败，使用降级文本")
+            return weather_data, "success", f"天气查询: 解析响应失败，使用降级文本"
+
+        print(f"  ✅ 天气查询: {city} (高德API)")
+        return weather_data, "success", None
+
+    except Exception as e:
+        fallback = _weather_fallback(city)
+        error_msg = f"天气查询失败: {str(e)}"
+        print(f"  ⚠️ {error_msg}")
+        return fallback, "failed", error_msg
+
+
+def _weather_fallback(city: str) -> str:
+    return f"【天气信息】\n- {city}: 天气数据暂不可用\n  建议：春秋季带外套，夏季注意防晒，冬季穿厚外套"
 
 
 # ── 城际交通计算（纯 API + 本地计算，不占图 Node） ──
