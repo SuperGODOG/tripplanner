@@ -7,7 +7,7 @@
 
     <div class="container">
       <h1>🧳 TripPlanner</h1>
-      <p class="subtitle">5 Node LangGraph · SSE 实时进度 · 8 维用户画像</p>
+      <p class="subtitle">5 Node LangGraph · 实时进度 · 8 维用户画像</p>
 
       <!-- 画像面板 -->
       <div class="glass-card" v-if="!planning">
@@ -186,45 +186,82 @@ onMounted(async () => {
   try { const r = await fetch(`${API}/api/profile`); profile.value = await r.json() } catch {}
 })
 
+const nodeOrder = ['attraction', 'hotel', 'memory', 'planner']
+const progressSteps = [15, 40, 65, 90]
+
 async function startPlan() {
   planning.value = true; result.value = null; errors.value = []; progressPct.value = 0
   // 重置流动状态
   Object.keys(flowState).forEach(k => flowState[k] = 'pending')
-  
-  const params = new URLSearchParams({ city: form.city, days: form.days, origin: form.origin, start_date: form.startDate, transport_mode: form.transportMode, preferences: form.prefs.join(',') })
-  const es = new EventSource(`${API}/api/trip/stream?${params}`)
-  
-  es.onmessage = (e) => {
-    const d = JSON.parse(e.data)
-    
-    if (d.status === 'start') {
-      flowState[d.node] = 'active'
-      progressPct.value = ((nodeOrder.indexOf(d.node)) / nodeOrder.length) * 80
-    } else if (d.status === 'done') {
-      if (d.data?.status === 'failed') {
-        flowState[d.node] = 'failed'
-      } else {
-        flowState[d.node] = 'done'
-      }
-      progressPct.value = ((nodeOrder.indexOf(d.node) + 1) / nodeOrder.length) * 80
-    } else if (d.status === 'ok' && d.node === 'connected') {
-      flowState.connected = 'done'
-    } else if (d.status === 'complete') {
-      result.value = d.data; errors.value = d.data.errors || []
-      progressPct.value = 100
-      // 确保所有状态标记为完成
-      nodeOrder.forEach(n => { if (flowState[n] === 'active') flowState[n] = 'done' })
-      setTimeout(() => { planning.value = false }, 800)
-      es.close(); loadProfile()
-    } else if (d.status === 'error') {
-      errors.value = [d.data?.message || '未知错误']; planning.value = false; es.close()
-    }
-  }
-  
-  es.onerror = () => { if (planning.value) { errors.value = ['SSE 连接中断']; planning.value = false } es.close() }
-}
 
-const nodeOrder = ['attraction', 'hotel', 'memory', 'planner']
+  // 发起 POST 请求（实际后端调用）
+  const payload = {
+    origin: form.origin,
+    city: form.city,
+    days: form.days,
+    start_date: form.startDate,
+    transport_mode: form.transportMode,
+    preferences: form.prefs,
+  }
+
+  const fetchPromise = fetch(`${API}/api/trip`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).then(async r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`)
+    const data = await r.json()
+    // 将 intercity_transport 映射为 intercity（匹配模板引用）
+    if (data.intercity_transport) {
+      data.intercity = {
+        mode: data.intercity_transport.mode,
+        distance_km: data.intercity_transport.distance_km,
+        distance_category: data.intercity_transport.distance_category,
+        estimated_cost: data.intercity_transport.estimated_cost,
+        duration_hours: data.intercity_transport.duration_hours,
+      }
+    }
+    return data
+  })
+
+  // 立即激活第一个阶段
+  flowState[nodeOrder[0]] = 'active'
+
+  let step = 1
+  const timer = setInterval(() => {
+    if (step > nodeOrder.length) {
+      clearInterval(timer)
+      return
+    }
+    // 前一个阶段标记为完成
+    flowState[nodeOrder[step - 1]] = 'done'
+    progressPct.value = progressSteps[step - 1]
+
+    // 激活下一个阶段（如果有）
+    if (step < nodeOrder.length) {
+      flowState[nodeOrder[step]] = 'active'
+    }
+    step++
+  }, 2000)
+
+  try {
+    const data = await fetchPromise
+    clearInterval(timer)
+    // 确保所有阶段标记为完成
+    nodeOrder.forEach(n => { flowState[n] = 'done' })
+    result.value = data
+    errors.value = data.errors || []
+    progressPct.value = 100
+    setTimeout(() => { planning.value = false }, 800)
+    loadProfile()
+  } catch (err) {
+    clearInterval(timer)
+    // 将当前 active 的阶段标记为 failed
+    nodeOrder.forEach(n => { if (flowState[n] === 'active') flowState[n] = 'failed' })
+    errors.value = ['请求失败: ' + err.message]
+    planning.value = false
+  }
+}
 
 async function loadProfile() { try { const r = await fetch(`${API}/api/profile`); profile.value = await r.json() } catch {} }
 
