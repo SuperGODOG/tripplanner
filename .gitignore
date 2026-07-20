@@ -1,0 +1,17 @@
+# 虚拟环境
+backend/venv/
+
+# 记忆数据
+backend/data/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# 临时文件
+.~*
+*.swp

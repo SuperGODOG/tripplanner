@@ -1,0 +1,219 @@
+# 🧳 TripPlanner
+
+> 多智能体旅行规划系统 — 5 Node LangGraph + MCP + 双轨异常检测画像
+
+[![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://python.org)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.2-purple)](https://langchain-ai.github.io/langgraph/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.139-green)](https://fastapi.tiangolo.com/)
+
+输入出发地 + 目的地 + 偏好 → 4 个 Agent 协作生成完整旅行计划（景点/天气/酒店/预算），用户画像随使用次数渐进构建。
+
+---
+
+## 🚀 快速部署
+
+### 1. 克隆项目
+
+```bash
+git clone https://github.com/你的用户名/tripplanner.git
+cd tripplanner/backend
+```
+
+### 2. 创建虚拟环境
+
+```bash
+python3 -m venv venv
+source venv/bin/activate       # Linux/macOS
+# venv\Scripts\activate        # Windows
+```
+
+### 3. 配置 API Key
+
+```bash
+cp .env.example venv/.env
+nano venv/.env
+```
+
+填入你的 Key：
+
+```ini
+LLM_API_KEY=sk-your-deepseek-key
+LLM_MODEL_ID=deepseek-chat
+LLM_BASE_URL=https://api.deepseek.com/v1
+AMAP_API_KEY=your-amap-web-service-key
+```
+
+> **高德 Key 申请**：https://console.amap.com/dev/key/app → 选择「Web 服务」类型
+>
+> **DeepSeek Key 申请**：https://platform.deepseek.com/api_keys
+
+### 4. 安装依赖并启动
+
+```bash
+# 配置国内镜像加速（可选）
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+pip install -r requirements.txt
+python run.py
+```
+
+浏览器打开：
+- **前端界面**：http://localhost:8000/app/
+- **API 文档**：http://localhost:8000/docs
+
+---
+
+## 🗑 重置记忆模块
+
+记忆数据存储在 `data/memory.json`，包含用户画像和行程计数。
+
+```bash
+# 完全重置（画像归零）
+rm -f backend/data/memory.json
+
+# 或只清空行程计数（保留偏好标签）
+python -c "
+from app.memory.manager import get_memory
+m = get_memory()
+m.trip_count = 0
+m._save()
+print('行程计数已重置')
+"
+```
+
+画像构建需要至少 5 次行程。重置后前端显示 `0 / 5 — 正在构建画像...`。
+
+---
+
+## 🏗 架构设计
+
+### 分层架构
+
+```
+第 5 层  多智能体编排     ← 5 Node LangGraph
+第 4 层  图编排框架       ← StateGraph / Edge / Checkpoint
+第 3 层  框架封装         ← HelloAgents SimpleAgent
+第 2 层  Agent 内循环     ← ReAct (Error-as-Observation)
+第 1 层  裸 LLM 调用      ← DeepSeek API
+第 0 层  API 预处理       ← 日期计算 / 城际交通 / 记忆写入
+```
+
+### 数据流向
+
+```
+POST /api/trip
+  │
+  ├─ API 预处理层
+  │   ├─ 日期列表本地计算（Python，不交 LLM）
+  │   ├─ 城际交通（maps_geo → maps_distance → 费用估算）
+  │   └─ 写入记忆（trip_count++）
+  │
+  └─ graph.invoke(state)
+       │
+       ├─ Node 1: attraction    景点 Agent + MCP
+       ├─ Node 2: weather       天气 Agent + MCP
+       ├─ Node 3: hotel         酒店 Agent + MCP
+       ├─ Node 4: memory        加载用户画像（纯本地）
+       └─ Node 5: planner       整合数据 + 画像 → JSON
+            │
+            └─ 降级检测: 所有 error_log 累积 → 前端列表展示
+```
+
+### 技术栈
+
+| 组件 | 选型 |
+|------|------|
+| 编排引擎 | LangGraph StateGraph |
+| Agent 框架 | HelloAgents SimpleAgent |
+| 工具协议 | MCP (amap-mcp-server, 16 个工具) |
+| LLM | DeepSeek (via HelloAgentsLLM) |
+| Web 框架 | FastAPI + Pydantic v2 |
+| 记忆 | 自定义五因子权重 + 双轨异常检测 |
+| 前端 | 单文件 HTML (零依赖) |
+
+### 工具架构
+
+```
+Agent 视角:  只看到 1 个 Tool (AmapToolWrapper)
+
+内部 3 层处理:
+  第 1 层  MCP 调用    maps_text_search / maps_weather
+  第 2 层  Format       JSON → 结构化文本（纯 Python）
+  第 3 层  Validate     完整性检查 + 默认值
+```
+
+### 记忆系统
+
+**五因子权重公式：**
+
+```
+final_weight = domain × decay × interaction × frequency_boost × outlier_penalty
+```
+
+**双轨异常检测：**
+
+| 轨道 | 数据类型 | 算法 | 示例 |
+|------|---------|------|------|
+| 数值型 | 价格标签 | IQR 四分位距 | 5 次 ¥300-500 → 1 次 ¥1500 → outlier |
+| 分类型 | 偏好标签 | 频率比 | 5 次"不吃辣" → 1 次"爱吃辣" → outlier |
+
+**画像维度（8 维）：** 出行方式 / 距离偏好 / 住宿 / 预算 / 饮食 / 交通 / 节奏 / 兴趣
+
+---
+
+## 🔮 后续更新计划
+
+- [ ] **Conditional Edge 完善**：当前为 linear graph，加入真正的 LangGraph conditional routing（节点失败→自动跳转降级路径）
+- [ ] **多用户支持**：记忆模块加入用户隔离（当前为单用户模式）
+- [ ] **向量化记忆检索**：当前为关键词匹配，升级为 embedding + 向量相似度（适合"用户之前去杭州时喜欢什么类型"这类语义查询）
+- [ ] **流式响应 (SSE)**：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度
+- [ ] **多 LLM 提供商**：支持 OpenAI / Claude / 本地模型切换
+- [ ] **A2A 协议集成**：Agent-to-Agent 通信，支持跨系统 Agent 协作
+- [ ] **前端重构**：从单文件 HTML 迁移到 React/Vue 组件化
+- [ ] **Docker 部署**：提供 Dockerfile + docker-compose，一键启动全部服务
+- [ ] **自动化测试**：pytest 覆盖各 Node 的单元测试 + 集成测试
+
+---
+
+## 📁 项目结构
+
+```
+tripplanner/
+├── README.md                    # 本文件
+├── PROJECT.md                   # 项目总文档（541 行）
+├── ARCHITECTURE.md              # 7 张 Mermaid 架构图
+├── plan/                        # Phase 1-7 计划 + 面试文档
+└── backend/
+    ├── app/
+    │   ├── agents/              # 4 SimpleAgent
+    │   ├── graph/               # 5 Node StateGraph
+    │   ├── tools/               # AmapToolWrapper + FallbackTool
+    │   ├── memory/              # 五因子 + 双轨异常检测
+    │   ├── api/                 # FastAPI + 城际交通预处理
+    │   ├── models/              # Pydantic 模型
+    │   └── services/            # MCP + LLM 单例
+    ├── static/index.html        # MVP 前端
+    ├── run.py                   # 一键启动
+    ├── .env.example             # 配置模板
+    ├── .gitignore
+    └── requirements.txt
+```
+
+---
+
+## 🖥 前端功能
+
+| 功能 | 说明 |
+|------|------|
+| 8 维度偏好标签 | 景点/饮食/交通/节奏/住宿/预算/出行方式 |
+| 出行方式选择 | 高铁/飞机/自驾 |
+| 用户画像面板 | 0/5 渐进构建 → 5 次后展示 8 维画像 |
+| 降级列表面板 | 实时展示各步骤的降级信息 |
+| 预算可视化 | 堆叠条形图 |
+| 天气预报卡片 | 7 日预报 |
+
+---
+
+## 📄 License
+
+MIT

@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# 虚拟环境（含真实 Key）
+venv/
+
+# 记忆数据
+data/
+
+# IDE
+.vscode/
+.idea/

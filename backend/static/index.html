@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TripPlanner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; }
+  .container { max-width: 860px; margin: 0 auto; padding: 20px; }
+  h1 { text-align: center; padding: 30px 0 10px; font-size: 24px; background: linear-gradient(135deg, #7c3aed, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { text-align: center; font-size: 13px; color: #666; margin-bottom: 20px; }
+  .card { background: #1a1a2e; border-radius: 12px; padding: 24px; margin-bottom: 20px; border: 1px solid #2a2a4a; }
+  .card h2 { font-size: 16px; margin-bottom: 16px; color: #a78bfa; }
+  .form-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .form-group { flex: 1; min-width: 100px; }
+  .form-group label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+  .form-group input, .form-group select { width: 100%; padding: 10px 12px; background: #0f0f1a; border: 1px solid #2a2a4a; border-radius: 8px; color: #e0e0e0; font-size: 14px; }
+  .form-group input:focus, .form-group select:focus { outline: none; border-color: #7c3aed; }
+  .dim-label { font-size: 12px; color: #888; margin: 12px 0 6px; display: block; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { padding: 5px 12px; border-radius: 16px; font-size: 12px; cursor: pointer; border: 1px solid #2a2a4a; background: #0f0f1a; color: #888; transition: all 0.2s; user-select: none; }
+  .tag.active { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+  .btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #7c3aed, #3b82f6); border: none; border-radius: 8px; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; margin-top: 16px; }
+  .btn:hover { opacity: 0.9; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .profile-building { text-align: center; padding: 20px; color: #888; }
+  .profile-building .counter { font-size: 36px; color: #7c3aed; font-weight: 700; margin: 12px 0; }
+  .profile-building .hint { font-size: 13px; }
+  .profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+  .profile-dim { background: #0f0f1a; border-radius: 8px; padding: 12px; }
+  .profile-dim .dim-name { font-size: 11px; color: #666; text-transform: uppercase; margin-bottom: 4px; }
+  .profile-dim .dim-value { font-size: 14px; color: #a78bfa; font-weight: 600; }
+
+  .loading { display: none; text-align: center; padding: 40px; }
+  .loading.active { display: block; }
+  .spinner { width: 40px; height: 40px; border: 3px solid #2a2a4a; border-top-color: #7c3aed; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .steps { font-size: 13px; color: #888; }
+  .step { margin: 4px 0; }
+  .step.done { color: #34d399; }
+  .step.active { color: #7c3aed; }
+
+  .result { display: none; }
+  .result.active { display: block; }
+  .day-card { background: #0f0f1a; border-radius: 8px; padding: 16px; margin-bottom: 12px; border-left: 3px solid #7c3aed; }
+  .day-card h3 { font-size: 15px; color: #a78bfa; margin-bottom: 6px; }
+  .day-card p.desc { font-size: 13px; color: #aaa; margin-bottom: 12px; }
+  .item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; font-size: 13px; }
+  .item .icon { font-size: 16px; flex-shrink: 0; }
+  .budget-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .budget-bar div { height: 100%; }
+  .budget-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #888; margin-top: 4px; }
+  .budget-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .weather { display: flex; gap: 12px; flex-wrap: wrap; }
+  .weather-day { background: #0f0f1a; padding: 10px 14px; border-radius: 8px; text-align: center; min-width: 85px; }
+  .weather-day .wdate { font-size: 11px; color: #888; }
+  .weather-day .wicon { font-size: 28px; margin: 4px 0; }
+  .weather-day .wtemp { font-size: 14px; font-weight: 600; }
+  .weather-day .wdesc { font-size: 11px; color: #aaa; }
+  .fallback-banner { background: #332211; border: 1px solid #886622; border-radius: 8px; padding: 14px; margin-bottom: 20px; color: #f0c060; font-size: 13px; display: none; }
+  .fallback-banner.active { display: block; }
+  .fallback-banner .fb-title { font-weight: 600; margin-bottom: 8px; color: #ffa500; }
+  .fallback-banner .fb-item { padding: 3px 0; font-size: 12px; color: #e0c080; }
+  .fallback-banner .fb-item::before { content: '▸ '; color: #886622; }
+  .error { background: #3b1111; border: 1px solid #7f1d1d; padding: 16px; border-radius: 8px; color: #fca5a5; font-size: 13px; display: none; }
+  .error.active { display: block; }
+  .suggestions { font-size: 13px; color: #aaa; line-height: 1.8; padding: 12px; background: #0f0f1a; border-radius: 8px; }
+  .meta-row { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; color: #888; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🧳 TripPlanner</h1>
+  <p class="subtitle">4 Agent + LangGraph + MCP · 多维度用户画像</p>
+
+  <!-- 画像面板 -->
+  <div class="card" id="profileCard">
+    <h2>🧠 用户画像</h2>
+    <div id="profileContent"><div class="profile-building"><div class="counter">0 / 5</div><div class="hint">正在构建画像...<br>至少规划 5 次行程后显示</div></div></div>
+  </div>
+
+  <!-- 降级 -->
+  <div class="fallback-banner" id="fallbackBanner">
+    <div class="fb-title">⚠️ 降级提示</div>
+    <div id="fallbackList"></div>
+  </div>
+
+  <!-- 输入 -->
+  <div class="card">
+    <h2>📍 规划新行程</h2>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label>出发地</label><input type="text" id="origin" value="上海"></div>
+      <div class="form-group" style="flex:1"><label>目的地</label><input type="text" id="city" value="北京"></div>
+      <div class="form-group" style="flex:1"><label>出发日期</label><input type="date" id="startDate"></div>
+      <div class="form-group" style="max-width:90px"><label>天数</label><select id="days"><option value="1">1天</option><option value="2">2天</option><option value="3" selected>3天</option><option value="5">5天</option><option value="7">7天</option></select></div>
+    </div>
+
+    <span class="dim-label">🚄 出行方式</span>
+    <div class="tags" id="dim-transport-mode">
+      <span class="tag active" data-val="高铁">🚄 高铁</span>
+      <span class="tag" data-val="飞机">✈️ 飞机</span>
+      <span class="tag" data-val="自驾">🚗 自驾</span>
+    </div>
+
+    <span class="dim-label">🎯 景点偏好</span>
+    <div class="tags" id="dim-interests">
+      <span class="tag active" data-val="历史文化">🏛 历史文化</span>
+      <span class="tag" data-val="美食">🍜 美食</span>
+      <span class="tag active" data-val="自然风光">🏔 自然风光</span>
+      <span class="tag" data-val="购物">🛍 购物</span>
+      <span class="tag" data-val="亲子">👶 亲子</span>
+    </div>
+
+    <span class="dim-label">🍽 饮食偏好</span>
+    <div class="tags" id="dim-diet">
+      <span class="tag" data-val="不吃辣">🥬 不吃辣</span>
+      <span class="tag" data-val="爱吃辣">🌶 爱吃辣</span>
+      <span class="tag" data-val="清淡">🥗 清淡</span>
+      <span class="tag" data-val="重口味">🍛 重口味</span>
+      <span class="tag" data-val="当地特色">🏠 当地特色</span>
+      <span class="tag" data-val="国际美食">🌍 国际美食</span>
+    </div>
+
+    <span class="dim-label">🚇 交通方式</span>
+    <div class="tags" id="dim-transport">
+      <span class="tag" data-val="地铁优先">🚇 地铁优先</span>
+      <span class="tag" data-val="打车优先">🚕 打车优先</span>
+      <span class="tag" data-val="自驾">🚗 自驾</span>
+      <span class="tag" data-val="公共交通">🚌 公共交通</span>
+    </div>
+
+    <span class="dim-label">⏱ 旅行节奏</span>
+    <div class="tags" id="dim-pace">
+      <span class="tag" data-val="悠闲慢游">🌿 悠闲慢游</span>
+      <span class="tag" data-val="适中">🚶 适中</span>
+      <span class="tag" data-val="紧凑高效">🏃 紧凑高效</span>
+    </div>
+
+    <span class="dim-label">🏨 住宿偏好</span>
+    <div class="tags" id="dim-accommodation">
+      <span class="tag" data-val="经济型酒店">💰 经济型</span>
+      <span class="tag" data-val="中端型酒店">🏨 中端型</span>
+      <span class="tag" data-val="高端型酒店">🏢 高端型</span>
+      <span class="tag" data-val="豪华型酒店">👑 豪华型</span>
+    </div>
+
+    <span class="dim-label">💵 预算偏好</span>
+    <div class="tags" id="dim-budget">
+      <span class="tag" data-val="穷游">🎒 穷游</span>
+      <span class="tag" data-val="经济适用">💡 经济适用</span>
+      <span class="tag" data-val="舒适享受">✨ 舒适享受</span>
+      <span class="tag" data-val="奢华体验">💎 奢华体验</span>
+    </div>
+
+    <button class="btn" onclick="planTrip()" id="submitBtn">🚀 生成旅行计划</button>
+  </div>
+
+  <div class="loading" id="loading"><div class="spinner"></div><div id="steps"></div></div>
+  <div class="error" id="error"></div>
+  <div class="result" id="result">
+    <div class="card" id="overview"></div>
+    <div class="card" id="weatherCard" style="display:none"></div>
+    <div id="daysContainer"></div>
+    <div class="card" id="suggestionsCard" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+document.getElementById('startDate').value = new Date().toISOString().split('T')[0];
+document.querySelectorAll('.tag').forEach(t => t.onclick = () => t.classList.toggle('active'));
+
+async function loadProfile() {
+  try {
+    const res = await fetch(`${API}/api/profile`);
+    if (!res.ok) return;
+    const d = await res.json();
+    const el = document.getElementById('profileContent');
+    if (!d.ready) {
+      el.innerHTML = `<div class="profile-building"><div class="counter">${d.trip_count||0} / 5</div><div class="hint">正在构建画像...<br>至少规划 5 次行程后显示</div>${d.trip_count>0?`<div class="hint" style="margin-top:8px;color:#a78bfa">已记录 ${d.trip_count} 次</div>`:''}</div>`;
+      return;
+    }
+    const p = d.profile||{};
+    const dims = [
+      ['🚄 出行', p.intercity_mode],
+      ['📏 距离', p.distance_pref],
+      ['🏨 住宿', p.accommodation||p.hotel_tier],
+      ['💵 预算', p.budget_tier||(p.budget_range||'')],
+      ['🍽 饮食', (p.diet||[]).join(' · ')],
+      ['🚇 交通', (p.transport||[]).join(' · ')],
+      ['⏱ 节奏', p.pace],
+      ['🎯 兴趣', (p.interests||[]).join(' · ')],
+    ].filter(([,v]) => v);
+    el.innerHTML = dims.length ? `<div class="profile-grid">${dims.map(([n,v]) => `<div class="profile-dim"><div class="dim-name">${n}</div><div class="dim-value">${v||'—'}</div></div>`).join('')}</div>` : '<div class="profile-building">暂无偏好数据</div>';
+  } catch(e) {}
+}
+loadProfile();
+
+const stepTexts = ['📍 景点搜索','🌤 天气查询','🏨 酒店推荐','🧠 加载画像','📋 行程规划'];
+function animSteps() {
+  const el = document.getElementById('steps');
+  el.innerHTML = stepTexts.map(t => `<div class="step">${t}...</div>`).join('');
+  const items = el.querySelectorAll('.step'); let i = 0;
+  const t = setInterval(() => { if(i>0) items[i-1].classList.add('done'); if(i<items.length) items[i].classList.add('active'); i++; if(i>items.length) clearInterval(t); }, 2000);
+  return () => clearInterval(t);
+}
+
+async function planTrip() {
+  const origin = document.getElementById('origin').value.trim();
+  const city = document.getElementById('city').value.trim();
+  if (!city) { alert('请输入目的地'); return; }
+  const days = parseInt(document.getElementById('days').value);
+  const startDate = document.getElementById('startDate').value;
+  const transportMode = document.querySelector('#dim-transport-mode .tag.active')?.dataset.val || '高铁';
+  const allPrefs = [...document.querySelectorAll('.tag.active')].map(t => t.dataset.val);
+  // 出行方式单独提取，不混入 preferences（后端单独处理）
+  const prefs = allPrefs.filter(v => !['高铁','飞机','自驾'].includes(v));
+
+  document.getElementById('submitBtn').disabled = true;
+  ['result','fallbackBanner','error'].forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById('loading').classList.add('active');
+  const stop = animSteps();
+
+  try {
+    const res = await fetch(`${API}/api/trip`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({origin,city,days,start_date:startDate,transport_mode:transportMode,preferences:prefs}) });
+    stop(); document.getElementById('loading').classList.remove('active'); document.getElementById('submitBtn').disabled = false;
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail||`HTTP ${res.status}`); }
+    const data = await res.json();
+
+    if (data.is_fallback || data.errors?.length) {
+      document.getElementById('fallbackBanner').classList.add('active');
+      const items = (data.errors || []).map(e => `<div class="fb-item">${e}</div>`).join('');
+      document.getElementById('fallbackList').innerHTML = items || '<div class="fb-item">部分服务降级，已使用本地方案</div>';
+    }
+    renderResult(data); loadProfile();
+  } catch(e) {
+    stop(); document.getElementById('loading').classList.remove('active'); document.getElementById('submitBtn').disabled = false;
+    document.getElementById('error').textContent = `❌ ${e.message}`; document.getElementById('error').classList.add('active');
+  }
+}
+
+function renderResult(data) {
+  document.getElementById('result').classList.add('active');
+  const b = data.budget || {}; const t = b.total || 0;
+  document.getElementById('overview').innerHTML = `<h2>🗺 ${data.origin?data.origin+' → ':''}${data.city}</h2>
+    ${data.intercity_transport ? `<div style="margin:8px 0;padding:8px 12px;background:#0f0f1a;border-radius:8px;font-size:13px;color:#a78bfa">🚄 ${data.intercity_transport.mode} · ${data.intercity_transport.distance_km}km (${data.intercity_transport.distance_category}) · 约${data.intercity_transport.duration_hours}h · ¥${data.intercity_transport.estimated_cost}</div>` : ''}
+    <div class="meta-row"><span>📅 ${data.start_date||'?'} 起 · ${data.days.length} 天</span><span style="font-size:18px;font-weight:700;color:#34d399">¥${t.toLocaleString()}</span></div></span></div>${t>0?budgetBar(b,t):''}`;
+
+  const w = data.weather_info||[]; const wc = document.getElementById('weatherCard');
+  if (w.length>0) { wc.style.display='block'; const icons={'晴':'☀️','多云':'⛅','阴':'☁️','雨':'🌧','雪':'❄️','雷阵雨':'⛈'}; wc.innerHTML=`<h2>🌡 天气预报</h2><div class="weather">${w.slice(0,7).map(x=>`<div class="weather-day"><div class="wdate">${x.date}</div><div class="wicon">${icons[x.day_weather]||'🌤'}</div><div class="wtemp">${x.day_temp}°</div><div class="wdesc">${x.day_weather}</div></div>`).join('')}</div>`; }
+  else wc.style.display='none';
+
+  document.getElementById('daysContainer').innerHTML = (data.days||[]).map((d,i)=>`<div class="day-card"><h3>📅 第${i+1}天 — ${d.date||''}</h3><p class="desc">${d.description||''}</p>${(d.attractions||[]).map(a=>`<div class="item"><span class="icon">🏛</span><div><strong>${a.name||'?'}</strong><br><span style="color:#888;font-size:11px">${a.description||''}</span></div></div>`).join('')}${(d.meals||[]).map(m=>`<div class="item"><span class="icon">🍽</span><span>${m.name||'?'} ${m.estimated_cost?'¥'+m.estimated_cost:''}</span></span></div>`).join('')}</div>`).join('');
+
+  const sug = document.getElementById('suggestionsCard');
+  if (data.overall_suggestions) { sug.style.display='block'; sug.innerHTML=`<h2>💡 旅行建议</h2><div class="suggestions">${data.overall_suggestions.replace(/\n/g,'<br>')}</div>`; }
+  else sug.style.display='none';
+}
+
+function budgetBar(b,t) {
+  const cs=['#7c3aed','#3b82f6','#f59e0b','#10b981'], ks=['total_attractions','total_hotels','total_meals','total_transportation'], ls=['景点','酒店','餐饮','交通'];
+  let h='<div class="budget-bar">'; ks.forEach((k,i)=>{const p=t>0?(b[k]||0)/t*100:0; if(p>0)h+=`<div style="width:${p}%;background:${cs[i]}"></div>`;}); h+='</div><div class="budget-legend">';
+  ks.forEach((k,i)=>{if(b[k])h+=`<span><span class="dot" style="background:${cs[i]}"></span>${ls[i]} ¥${b[k].toLocaleString()}</span>`;});
+  return h+='</div>';
+}
+document.getElementById('city').onkeydown = e => { if (e.key === 'Enter') planTrip(); };
+</script>
+</body>
+</html>
