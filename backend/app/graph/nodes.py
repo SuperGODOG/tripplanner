@@ -90,7 +90,7 @@ def memory_node(state: TripPlannerState) -> dict:
 # ── 常量 ──
 MAX_RETRY = 3               # Planner 自回环最大次数
 MAX_HOTEL_RETRY = 2          # 酒店回环最大次数（离群重算）
-OUTLIER_DIST_FACTOR = 2.0   # 离群距离 > 平均值 * 这个因子 → 标记为离群
+OUTLIER_SIGMA = 1.5           # 离群阈值（标准差倍数）：距离 > mean + k*sigma → 离群
 MAX_HOTEL_DIST_KM = 10      # 酒店到最远景点距离阈值（软伤）
 BUDGET_OVER_PCT = 0.3       # 预算超用户偏好 30%（硬伤）
 
@@ -202,7 +202,23 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
             dists.append(d)
 
         avg_dist = sum(dists) / len(dists) if dists else 0
-        threshold = avg_dist * OUTLIER_DIST_FACTOR
+
+        # 标准差
+        n = len(dists)
+        if n > 1:
+            variance = sum((d - avg_dist) ** 2 for d in dists) / n
+            sigma = variance ** 0.5
+        else:
+            sigma = 0
+
+        # 阈值 = mean + k * sigma（容忍大部分城市内部差异）
+        threshold = avg_dist + OUTLIER_SIGMA * sigma if sigma > 0 else avg_dist * 2
+
+        # 汇总：打印距离分布方便调试
+        print(f"  📏 景点距离: avg={avg_dist:.1f}km sigma={sigma:.1f}km threshold={threshold:.1f}km")
+        for i, d in enumerate(dists[:5]):
+            flag = " ← 离群" if d > threshold else ""
+            print(f"     {coords[i].get('name','?')}: {d:.1f}km{flag}")
 
         # 标记离群
         inliers = []
