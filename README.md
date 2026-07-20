@@ -173,6 +173,21 @@ final_weight = domain × decay × interaction × frequency_boost × outlier_pena
 
 **画像维度（8 维）：** 出行方式 / 距离偏好 / 住宿 / 预算 / 饮食 / 交通 / 节奏 / 兴趣
 
+### 扩展: Agent 反馈环
+
+当前图是 5 Node 线性流: `attraction → weather → hotel → memory → planner → END`。但 LangGraph 的 `conditional edge` 机制天然支持循环——这是图结构（状态机）相对于传统顺序调用的核心优势。
+
+例如：如果 Planner 发现酒店不匹配景点位置或预算，可以通过 conditional edge 回到 hotel Agent 重新搜索：
+
+```python
+graph.add_conditional_edges("planner", check_status, {
+    "retry_hotel": "hotel",
+    "done": END
+})
+```
+
+只需改一行代码即可实现 Agent 间反馈环，无需重构整个流程。
+
 ---
 
 ## 🔮 后续更新计划

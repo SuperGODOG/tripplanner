@@ -190,6 +190,21 @@ def attraction_node(state):
 START → attraction → weather → hotel → memory → planner → END
 ```
 
+**预留: Agent 反馈环**
+
+当前是线性流，但 LangGraph 的 conditional edge 机制天然支持循环——这是图结构（状态机）对传统顺序调用的核心优势。
+
+举例：Planner 发现酒店不匹配景点位置/预算 → 通过 conditional edge 回到 hotel Agent 重新搜索：
+
+```python
+graph.add_conditional_edges("planner", check_status, {
+    "retry_hotel": "hotel",
+    "done": END
+})
+```
+
+只需改一行即可实现 Agent 间闭环反馈，而传统顺序调用要加这种逻辑需要大量 if/else 和异常处理。
+
 ### 4.3 5 Node 分工详表
 
 | Node | 类型 | 调 LLM | 调 MCP | 职责 |
