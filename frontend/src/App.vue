@@ -187,7 +187,7 @@ onMounted(async () => {
 })
 
 const nodeOrder = ['attraction', 'hotel', 'memory', 'planner']
-const progressSteps = [15, 40, 65, 90]
+const progressSteps = [15, 35, 55, 70]  // 最后一步只到 70%，等 fetch 返回才跳 100%
 
 async function startPlan() {
   planning.value = true; result.value = null; errors.value = []; progressPct.value = 0
@@ -237,12 +237,12 @@ async function startPlan() {
     flowState[nodeOrder[step - 1]] = 'done'
     progressPct.value = progressSteps[step - 1]
 
-    // 激活下一个阶段（如果有）
+    // 激活下一个阶段——但 planner 始终 active 直到 fetch 返回
     if (step < nodeOrder.length) {
       flowState[nodeOrder[step]] = 'active'
     }
     step++
-  }, 2000)
+  }, 4000)  // 4 秒一步，匹配真实后端耗时
 
   try {
     const data = await fetchPromise
