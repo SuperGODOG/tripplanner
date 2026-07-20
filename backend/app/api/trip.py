@@ -89,7 +89,7 @@ async def plan_trip_stream(
     preferences: str = "",  # comma-separated
 ):
     """SSE 流式端点——前端实时看到每个 Node 进度"""
-    import json, asyncio
+    import json, asyncio, queue
     from ..graph.events import SSEEmitter
     from ..graph.nodes import set_emitter
 
@@ -123,44 +123,80 @@ async def plan_trip_stream(
                 "final_plan": {}, "error_log": [], "user_profile": {},
             }
 
+            # 发送连接成功事件
+            yield f"data: {json.dumps({'node': 'connected', 'status': 'ok', 'data': {}}, ensure_ascii=False)}\n\n"
+
             set_emitter(emitter)
-            loop = asyncio.get_event_loop()
             graph = get_trip_graph()
 
-            # 后台跑 graph，同时 stream 事件
-            task = loop.run_in_executor(None, lambda: graph.invoke(state))
-            async for msg in emitter.stream():
-                yield msg
-            result = await task
+            # 在 executor 中运行同步 graph.invoke()，避免阻塞事件循环
+            import concurrent.futures
+            loop = asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = loop.run_in_executor(pool, lambda: graph.invoke(state))
+
+                # 轮询：从线程安全 queue 中取事件，逐个 yield
+                while not future.done():
+                    drained = False
+                    while True:
+                        try:
+                            event = emitter.get_nowait()
+                            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                            drained = True
+                        except queue.Empty:
+                            break
+                    # 有事件时立即继续轮询（无延迟），无事件时才 sleep 50ms
+                    if drained:
+                        await asyncio.sleep(0)
+                    else:
+                        await asyncio.sleep(0.05)
+
+                # 排空残余事件（graph 已完成，最后再排一次）
+                while not emitter.empty():
+                    try:
+                        event = emitter.get_nowait()
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    except queue.Empty:
+                        break
+
+                result = future.result()
             set_emitter(None)
 
             # 最终结果
             plan_data = result.get("final_plan", {})
             errors = result.get("error_log", [])
-            emitter.emit("done", "complete", {
-                "city": plan_data.get("city", city),
-                "days": plan_data.get("days", []),
-                "weather_info": plan_data.get("weather_info", []),
-                "overall_suggestions": plan_data.get("overall_suggestions", ""),
-                "budget": plan_data.get("budget", {}),
-                "intercity": {
-                    "mode": transport_mode,
-                    "distance_km": intercity.distance_km if intercity else 0,
-                    "distance_category": intercity.distance_category if intercity else "",
-                    "estimated_cost": intercity.estimated_cost if intercity else 0,
-                    "duration_hours": intercity.duration_hours if intercity else 0,
-                } if intercity else None,
-                "is_fallback": plan_data.get("status") == "fallback" or len(errors) > 0,
-                "errors": errors,
-            })
+            final_event = {
+                "node": "done", "status": "complete",
+                "data": {
+                    "city": plan_data.get("city", city),
+                    "days": plan_data.get("days", []),
+                    "weather_info": plan_data.get("weather_info", []),
+                    "overall_suggestions": plan_data.get("overall_suggestions", ""),
+                    "budget": plan_data.get("budget", {}),
+                    "intercity": {
+                        "mode": transport_mode,
+                        "distance_km": intercity.distance_km if intercity else 0,
+                        "distance_category": intercity.distance_category if intercity else "",
+                        "estimated_cost": intercity.estimated_cost if intercity else 0,
+                        "duration_hours": intercity.duration_hours if intercity else 0,
+                    } if intercity else None,
+                    "is_fallback": plan_data.get("status") == "fallback" or len(errors) > 0,
+                    "errors": errors,
+                },
+            }
+            yield f"data: {json.dumps(final_event, ensure_ascii=False)}\n\n"
         except Exception as e:
-            emitter.emit("error", "error", {"message": str(e)})
+            yield f"data: {json.dumps({'node': 'error', 'status': 'error', 'data': {'message': str(e)}}, ensure_ascii=False)}\n\n"
 
-        # yield 所有事件
-        async for msg in emitter.stream():
-            yield msg
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 # ── 城际交通计算（纯 API + 本地计算，不占图 Node） ──
@@ -188,7 +224,7 @@ def _compute_intercity(origin: str, city: str, mode: str) -> tuple[IntercityTran
         geo_d = str(mcp.run({"action": "call_tool", "tool_name": "maps_geo", "arguments": {"address": city}}))
 
         def get_coord(s):
-            m = re.search(r'"location"\s*:\s*"([\d.]+),([\d.]+)"', s)
+            m = re.search(r'\"location\"\s*:\s*\"([\d.]+),([\d.]+)\"', s)
             return (float(m.group(1)), float(m.group(2))) if m else None
 
         oc, dc = get_coord(geo_o), get_coord(geo_d)
@@ -201,8 +237,8 @@ def _compute_intercity(origin: str, city: str, mode: str) -> tuple[IntercityTran
                                  "arguments": {"origins": f"{oc[0]},{oc[1]}",
                                                "destination": f"{dc[0]},{dc[1]}",
                                                "type": "1"}}))
-        dm = re.search(r'"distance"\s*:\s*"(\d+)"', dist_raw)
-        dur_m = re.search(r'"duration"\s*:\s*"(\d+)"', dist_raw)
+        dm = re.search(r'\"distance\"\s*:\s*\"(\d+)\"', dist_raw)
+        dur_m = re.search(r'\"duration\"\s*:\s*\"(\d+)\"', dist_raw)
         if not dm:
             return _intercity_fallback(origin, city, mode, "距离测量失败")
 
