@@ -127,7 +127,7 @@ const profile = ref({ ready: false, trip_count: 0 })
 
 // ── 流动文案状态机 ──
 const flowState = reactive({
-  attraction: 'pending', weather: 'pending', hotel: 'pending',
+  attraction: 'pending', hotel: 'pending',
   memory: 'pending', planner: 'pending', connected: 'pending'
 })
 
@@ -135,7 +135,6 @@ const flowState = reactive({
 const stageMessages = {
   connected:  { start: (city) => `🔗 正在连接服务器...`, done: null },
   attraction: { start: (city) => `📍 正在搜索${city}的景点...`,  done: (city) => `✅ 景点搜索完成`, failed: (city) => `⚠️ 景点搜索失败，使用降级数据` },
-  weather:    { start: (city) => `🌤 正在查询${city}天气...`,  done: (city) => `✅ 天气获取完成`, failed: (city) => `⚠️ 天气查询失败，使用降级数据` },
   hotel:      { start: (city) => `🏨 正在搜索${city}酒店...`,  done: (city) => `✅ 酒店搜索完成`, failed: (city) => `⚠️ 酒店搜索失败，使用降级数据` },
   memory:     { start: (city) => `🧠 正在加载用户画像...`,    done: (city) => `✅ 画像加载完成` },
   planner:    { start: (city) => `📋 正在生成${city}旅行计划...`, done: (city) => `🎉 计划生成完毕！` },
@@ -145,7 +144,7 @@ const stageMessages = {
 const progressMessages = computed(() => {
   const city = form.city || '目的地'
   const msgs = []
-  const order = ['attraction', 'weather', 'hotel', 'memory', 'planner']
+  const order = ['attraction', 'hotel', 'memory', 'planner']
   
   for (const node of order) {
     const s = flowState[node]
@@ -225,7 +224,7 @@ async function startPlan() {
   es.onerror = () => { if (planning.value) { errors.value = ['SSE 连接中断']; planning.value = false } es.close() }
 }
 
-const nodeOrder = ['attraction', 'weather', 'hotel', 'memory', 'planner']
+const nodeOrder = ['attraction', 'hotel', 'memory', 'planner']
 
 async function loadProfile() { try { const r = await fetch(`${API}/api/profile`); profile.value = await r.json() } catch {} }
 
