@@ -69,8 +69,8 @@ flowchart TB
 
 ## 图 2：LangGraph 状态机流转（5 Node）
 
-> 本图展示**第 4 层（图级）**的节点流转。
-> 城际交通计算已移至 API 层（不在图中）。
+> 城际交通 + 日期计算在 **API 层预处理**，不在 LangGraph 图中。
+> 图从 `graph.invoke(state)` 开始，此时 State 已含所有预处理数据。
 > Agent 内部的 Error-as-Observation（第 2 层）见图 6。
 
 ```mermaid
@@ -204,82 +204,43 @@ flowchart TB
         DIALOG["对话内容 / 用户偏好"]
     end
 
-    subgraph Step1["Step 1: 领域分类"]
-        C1["景点类 (2x)"]
-        C2["酒店类 (1.5x)"]
-        C3["偏好类 (1.5x)"]
-        C4["天气类 (1x)"]
-        C5["通用类 (1x)"]
-    end
-
-    subgraph Step2["Step 2: 多维度标签提取"]
-        TAG1["城市"]
-        TAG2["价格区间（数值型 → IQR 检测）"]
-        TAG3["饮食偏好（分类型 → 频率比检测）"]
-        TAG4["交通方式"]
-        TAG5["出行方式（高铁/飞机/自驾）"]
-        TAG6["距离（短途/中途/长途）"]
-        TAG7["节奏 / 住宿 / 预算 / 景点偏好"]
-    end
-
-    subgraph Step3["Step 3: 五因子权重计算"]
-        direction TB
-        F1["① 领域权重 domain<br/>景点2x / 酒店1.5x / 天气1x"]
-        F2["② 衰减权重 decay<br/>指数衰减 0.95^days"]
-        F3["③ 交互修正 interaction<br/>modify×1.5 / confirm×1.2"]
-        F4["④ 频率加成 frequency_boost<br/>同标签出现 N 次 → 1+min(N×0.15, 1.0)"]
-        F5["⑤ 异常惩罚 outlier_penalty<br/>双轨检测：数值型 IQR + 分类型频率比"]
-
-        FORMULA["最终权重 = domain × decay × interaction<br/>× frequency_boost × outlier_penalty"]
-    end
-
-    subgraph Step4["Step 4: 双轨异常检测"]
+    subgraph Step1["Step 1: 领域分类 × 标签提取"]
         direction LR
-        subgraph Track1["轨道 1: 数值型 IQR（价格）"]
-            NORMAL["5 次经济型酒店<br/>中位数 400, IQR=50<br/>weight ≈ 2.40"]
-            OUTLIER1["1 次豪华酒店<br/>中值 1750 > Q3+2IQR<br/>outlier_penalty=0.3<br/>weight ≈ 0.45"]
-        end
-        subgraph Track2["轨道 2: 分类型频率比（偏好维度）"]
-            NORMAL2["5 次"饮食:不吃辣"<br/>众数频次 = 5"]
-            OUTLIER2["1 次"饮食:爱吃辣"<br/>新标签频次 < 众数×0.3<br/>outlier_penalty=0.3"]
-        end
-        CONCLUSION["画像保持: 经济型 + 不吃辣<br/>偶然行为不污染画像"]
-        NORMAL --> CONCLUSION
-        OUTLIER1 --> CONCLUSION
-        NORMAL2 --> CONCLUSION
-        OUTLIER2 --> CONCLUSION
+        C1["景点类 2x"] --- C2["酒店类 1.5x"] --- C3["偏好类 1.5x"] --- C4["天气类 1x"]
+        T1["城市"] --- T2["价格区间"] --- T3["饮食"] --- T4["交通/出行/距离/节奏/住宿/预算/景点"]
     end
 
-    subgraph Step5["Step 5: 画像维度 + 排序 + 持久化"]
-        subgraph ProfileDims["画像维度（8 维）"]
-            direction LR
-            PD1["出行方式"]
-            PD2["距离"]
-            PD3["住宿/酒店档次"]
-            PD4["预算"]
-            PD5["饮食"]
-            PD6["交通"]
-            PD7["节奏"]
-            PD8["兴趣/景点"]
-        end
-        GATE["trip_count ≥ 5 → 画像生效<br/>前端展示 6 维度标签"]
-        SORT["降序排列, Top-N 保留"]
-        DEDUP["内容相似去重"]
-        STORE["写入 data/memory.json<br/>含 trip_count"]
+    subgraph Step2["Step 2: 五因子权重计算"]
+        direction LR
+        F1["① domain<br/>领域权重"] --- F2["② decay<br/>时间衰减"] --- F3["③ interaction<br/>交互修正"] --- F4["④ frequency_boost<br/>频率加成"] --- F5["⑤ outlier_penalty<br/>异常惩罚"]
     end
 
-    DIALOG --> C1 & C2 & C3 & C4 & C5
-    C1 & C2 & C3 & C4 & C5 --> TAG1 & TAG2 & TAG3 & TAG4 & TAG5 & TAG6 & TAG7
-    TAG1 & TAG2 & TAG3 & TAG4 & TAG5 & TAG6 & TAG7 --> F1
-    F1 & F2 & F3 & F4 & F5 --> FORMULA
-    FORMULA --> SORT --> DEDUP
-    DEDUP --> PD1 & PD2 & PD3 & PD4 & PD5 & PD6 & PD7 & PD8
-    PD1 & PD2 & PD3 & PD4 & PD5 & PD6 & PD7 & PD8 --> GATE --> STORE
+    FORMULA["最终权重 = domain × decay × interaction × frequency_boost × outlier_penalty"]
 
-    style Step4 fill:#fff3cd,stroke:#ffc107
+    subgraph Step3["Step 3: 双轨异常检测"]
+        direction LR
+        T1A["轨道1 数值型 IQR<br/>5次¥300-500 → 1次¥1500<br/>偏离Q3+2IQR → penalty=0.3"]
+        T2A["轨道2 分类型 频率比<br/>5次不吃辣 → 1次爱吃辣<br/>频次<众数×0.3 → penalty=0.3"]
+    end
+
+    RESULT["画像保持: 经济型 + 不吃辣<br/>偶然行为不污染画像"]
+
+    subgraph Step4["Step 4: 8维画像 + 持久化"]
+        DIMS["出行方式 | 距离 | 住宿 | 预算 | 饮食 | 交通 | 节奏 | 兴趣"]
+        GATE["trip_count ≥ 5 → 画像生效<br/>前端: 6维度标签 + 降级面板"]
+        STORE["写入 data/memory.json"]
+    end
+
+    DIALOG --> Step1
+    Step1 --> Step2
+    Step2 --> FORMULA
+    FORMULA --> Step3
+    Step3 --> RESULT
+    RESULT --> Step4
+    DIMS --> GATE --> STORE
+
+    style Step3 fill:#fff3cd,stroke:#ffc107
     style FORMULA fill:#d0bfff,stroke:#6741d9
-    style Track1 fill:#e8f5e9,stroke:#4caf50
-    style Track2 fill:#e3f2fd,stroke:#2196f3
 ```
 
 ---

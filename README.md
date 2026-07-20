@@ -61,6 +61,19 @@ python run.py
 - **前端界面**：http://localhost:8000/app/
 - **API 文档**：http://localhost:8000/docs
 
+### 5. 启动 / 关闭
+
+```bash
+# 启动（前台，Ctrl+C 关闭）
+cd backend && source venv/bin/activate && python run.py
+
+# 后台启动
+nohup python run.py > server.log 2>&1 &
+
+# 关闭
+kill $(lsof -ti:8000)
+```
+
 ---
 
 ## 🗑 重置记忆模块

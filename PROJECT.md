@@ -185,9 +185,28 @@ def attraction_node(state):
 | Error-as-Observation | Agent 级 | Node 内 catch 异常 | MCP 超时→返回降级文本→Agent 自主决定 |
 
 当前图（5 Node，城际交通在 API 层预处理，不在图中）：
+
 ```
 START → attraction → weather → hotel → memory → planner → END
 ```
+
+### 4.3 5 Node 分工详表
+
+| Node | 类型 | 调 LLM | 调 MCP | 职责 |
+|------|------|--------|--------|------|
+| **attraction** | Agent | ✅ | ✅ maps_text_search | 根据城市+偏好搜索景点。ReAct 循环：LLM 决定调什么关键词，MCP 返回 POI 列表，LLM 整理结果。失败 → attraction_status="failed"，不阻断下游 |
+| **weather** | Agent | ✅ | ✅ maps_weather | 查询目的地 7 日天气。独立于景点——景点失败不影响天气查询。失败 → 降级为通用穿衣建议 |
+| **hotel** | Agent | ✅ | ✅ maps_text_search | 搜索目的地酒店。与景点/天气并行无依赖（当前 linear，后续 conditional edge 可并行）。失败 → 降级为通用住宿推荐 |
+| **memory** | 数据加载 | ❌ | ❌ | 从 `data/memory.json` 加载用户画像，注入 `state.user_profile`。纯本地 I/O，不消耗 token。trip_count < 5 时画像为空 |
+| **planner** | Agent | ✅ | ❌ | 整合前三者数据 + 用户画像，生成结构化 TripPlan JSON。**唯一不调 MCP 的 Node**——输入已由前 4 个 Node 准备好，纯 LLM 推理。根据各 Node 的 status 自动生成降级标注 |
+
+**为什么 memory 是独立 Node 而非 planner 内部调用？**
+
+> 职责分离：memory 管数据获取，planner 管推理。分开后可以独立测试、独立替换（后续换向量检索不影响 planner）。面试关键词：**单一职责原则**。
+
+**为什么 planner 没有工具？**
+
+> Planner 的输入是前 4 个 Node 已经处理好的结构化数据。给它加工具反而让它分心——Planner 的职责是"理解和重组"，不是"搜索和获取"。Agent 1-3 是感知型，Agent 4 是推理型。
 
 **为什么城际交通不在图中？** 城际交通需要跨城市距离矩阵计算（如北京→上海），这在 Node 内通过 MCP 逐个调用效率低且增加 ReAct 轮次。提前在 API 层批量计算后注入 State，图内 Node 无需感知城际逻辑。
 
