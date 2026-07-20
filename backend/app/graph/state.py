@@ -29,6 +29,10 @@ class TripPlannerState(TypedDict, total=False):
     center_lat: float             # 景点群物理中心纬度
     attraction_coords: list       # [{name, lng, lat}, ...]
 
+    # ── 中心覆写（planner 离群检测后产出）──
+    center_lng_override: float    # 去掉离群景点后新中心经度
+    center_lat_override: float    # 去掉离群景点后新中心纬度
+
     # ── 状态标记 ──
     attraction_status: str
     weather_status: str
