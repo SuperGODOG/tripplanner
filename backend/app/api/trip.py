@@ -97,7 +97,6 @@ async def plan_trip_stream(
 
     async def event_stream():
         try:
-            # 准备 state（复用同步 API 的逻辑）
             prefs = [p.strip() for p in preferences.split(",") if p.strip()]
             start = start_date or date.today().isoformat()
             date_list = [(date.fromisoformat(start) + timedelta(days=i)).isoformat() for i in range(days)]
@@ -108,10 +107,8 @@ async def plan_trip_stream(
             if origin: memory.add(f"出发地: {origin}", "observe")
             memory.add(f"出行方式: {transport_mode}", "observe")
             for p in prefs: memory.add(f"偏好: {p}", "observe")
-            if intercity and intercity.distance_category:
-                memory.add(f"距离分类: {intercity.distance_category}", "observe")
-            memory.trip_count += 1
-            memory._save()
+            if intercity and intercity.distance_category: memory.add(f"距离分类: {intercity.distance_category}", "observe")
+            memory.trip_count += 1; memory._save()
 
             state = {
                 "origin": origin, "city": city, "days": days,
@@ -126,13 +123,15 @@ async def plan_trip_stream(
                 "final_plan": {}, "error_log": [], "user_profile": {},
             }
 
-            # 注入 emitter
             set_emitter(emitter)
-
-            # 在线程中跑 graph（不阻塞 async loop）
-            graph = get_trip_graph()
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, lambda: graph.invoke(state))
+            graph = get_trip_graph()
+
+            # 后台跑 graph，同时 stream 事件
+            task = loop.run_in_executor(None, lambda: graph.invoke(state))
+            async for msg in emitter.stream():
+                yield msg
+            result = await task
             set_emitter(None)
 
             # 最终结果
