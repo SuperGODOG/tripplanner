@@ -105,7 +105,7 @@
           <h2>📅 第{{ i+1 }}天 — {{ d.date }}</h2>
           <p class="desc">{{ d.description }}</p>
           <div class="item" v-if="d.hotel">🏨 <strong>{{ d.hotel.name }}</strong> · {{ d.hotel.price_range }} · ¥{{ d.hotel.estimated_cost }}</div>
-          <div class="item" v-for="a in d.attractions" :key="a.name">🏛 {{ a.name }} <span class="hint">{{ a.description? }}</span></div>
+          <div class="item" v-for="a in d.attractions" :key="a.name">🏛 {{ a.name }} <span class="hint">{{ a.description }}</span></div>
           <div class="item" v-for="m in d.meals" :key="m.name">🍽 {{ m.name }} <span class="hint">¥{{ m.estimated_cost }}</span></div>
         </div>
         <div class="glass-card" v-if="result.overall_suggestions">
