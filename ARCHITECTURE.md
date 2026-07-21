@@ -250,11 +250,12 @@ flowchart TB
 
 ---
 
-## 图 6：错误恢复 — 两层协同 + error_log 累积
+## 图 6：错误恢复 — 三层协同 + error_log 累积 + Conditional Edge 重试
 
-> **图级** Conditional Routing（第 4 层）→ 见图 2。节点间路由，读 status 决定下一跳。
+> **图级** Conditional Routing（第 4 层）→ 见图 2。planner 执行后根据 `_validate_and_refine()` 结果路由。
 > **Agent 级** Error-as-Observation（第 2 层）→ 本图。Agent 内部处理工具调用失败。
 > **累积机制** error_log: Annotated[list, add] — LangGraph 自动合并所有 Node 的降级信息。
+> **重试上限** planner 硬伤最多重试 3 次（MAX_RETRY），hotel 离群重算最多 2 次（MAX_HOTEL_RETRY）。
 
 ```mermaid
 flowchart LR
@@ -281,6 +282,22 @@ flowchart LR
         GFAIL --> GEDGE --> ACCUM --> API_RET
     end
 
+    subgraph CondRetry["Conditional Edge 重试（planner 路由）"]
+        direction TB
+        CR1["retry_planner<br/>硬伤重生成<br/>最多 3 次（MAX_RETRY=3）"]
+        CR2["retry_hotel<br/>离群景点 → 重算中心<br/>回酒店用新中心重搜<br/>最多 2 次（MAX_HOTEL_RETRY=2）"]
+        CR3["done<br/>校验通过 / 重试耗尽<br/>→ END"]
+        CR1 --- CR2 --- CR3
+    end
+
+    subgraph OutlierDetect["离群检测（planner_node 内置）"]
+        direction TB
+        OD1["标准差法: distance > mean + 1.5σ"]
+        OD2["硬上限: >80km 直接排除"]
+        OD3["排除离群 → 重算质心<br/>→ 触发 retry_hotel"]
+        OD1 --- OD2 --- OD3
+    end
+
     subgraph FallbackPanel["前端降级列表面板"]
         FP["6 维度标签<br/>+ 出行方式选择<br/>+ 降级列表展示<br/>（来自 error_log）"]
     end
@@ -288,8 +305,11 @@ flowchart LR
     RETRY -.->|"重试成功"| DONE
     RETRY -.->|"多次失败"| FB["FallbackTool<br/>生成降级模板"]
     API_RET -.-> FP
+    CondRetry -.-> OutlierDetect
 
     style ACCUM fill:#c3fae8,stroke:#0c8599
+    style CondRetry fill:#d0bfff,stroke:#6741d9
+    style OutlierDetect fill:#fff3cd,stroke:#ffc107
     style FallbackPanel fill:#fff3cd,stroke:#ffc107
 ```
 
@@ -301,7 +321,7 @@ flowchart LR
 flowchart LR
     subgraph L5["第 5 层: 多智能体编排"]
         direction TB
-        N5["TripPlanner LangGraph<br/>5 个 Node:<br/>attraction→weather→hotel<br/>→memory→planner"]
+        N5["TripPlanner LangGraph<br/>4 个 Node:<br/>attraction→hotel<br/>→memory→planner<br/>+ Conditional Edge"]
     end
 
     subgraph L4["第 4 层: 图编排框架"]
@@ -326,7 +346,7 @@ flowchart LR
 
     subgraph L0["第 0 层: API 预处理"]
         direction TB
-        N0["FastAPI trip.py<br/>日期本地预计算<br/>城际交通计算<br/>记忆写入 + trip_count++"]
+        N0["FastAPI trip.py<br/>日期本地预计算<br/>天气查询（maps_weather）<br/>城际交通计算<br/>记忆写入 + trip_count++"]
     end
 
     N1 --> N2 --> N3 --> N4 --> N5 --> N0
@@ -342,4 +362,4 @@ flowchart LR
 ---
 
 _定位: `/home/caoruixin/projects/tripplanner/ARCHITECTURE.md`_
-_最后更新: 2026-07-20 — 与实际代码对齐_
+_最后更新: 2026-07-21 — 4 Node + Conditional Edge + 离群检测（与实际代码对齐）_
