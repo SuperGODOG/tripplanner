@@ -12,19 +12,20 @@ flowchart TB
         direction LR
         PRE1["日期计算<br/>Python 本地预计算<br/>不交 LLM"]
         PRE2["城际交通<br/>距离/时间/费用<br/>高德 API + fallback"]
+        PRE3["天气查询<br/>maps_weather 直接调用<br/>格式化后注入 State"]
     end
 
     subgraph Layer5["第 5 层: 多智能体编排"]
         direction LR
-        N1["attraction_node<br/>景点 Agent + MCP"]
-        N2["weather_node<br/>天气 Agent + MCP"]
-        N3["hotel_node<br/>酒店 Agent + MCP"]
+        N1["attraction_node<br/>景点 Agent + MCP<br/>maps_geo 坐标增强"]
+        N3["hotel_node<br/>酒店 Agent + MCP<br/>景点中心就近搜索"]
         N4["memory_node<br/>加载用户画像<br/>（纯本地读取）"]
-        N5["planner_node<br/>整合 + 推理<br/>（无工具，纯推理）"]
+        N5["planner_node<br/>整合 + 推理 + 离群检测<br/>（无工具，纯推理）"]
     end
 
     subgraph Layer4["第 4 层: 图编排 (LangGraph)"]
-        EDGE["Edge: attraction→weather→hotel→memory→planner"]
+        EDGE["Edge: attraction→hotel→memory→planner"]
+        COND["Conditional: planner → retry_planner / retry_hotel / done"]
         ERRLOG["error_log: Annotated[list, add]<br/>所有 Node 降级写入，自动累积"]
         CHECKPOINT["Checkpoint: 每步 State 自动快照"]
     end
@@ -51,13 +52,12 @@ flowchart TB
         MEMORY["MemoryManager<br/>五因子权重 + 双轨异常检测<br/>数值型 IQR + 分类型频率比<br/>trip_count ≥ 5 才显示画像"]
     end
 
-    USER["POST /api/trip<br/>城市 + 天数 + 偏好"] --> PRE1 & PRE2
-    PRE1 & PRE2 --> N1
-    N1 --> N2 --> N3 --> N4 --> N5
+    USER["POST /api/trip<br/>城市 + 天数 + 偏好"] --> PRE1 & PRE2 & PRE3
+    PRE1 & PRE2 & PRE3 --> N1
+    N1 --> N3 --> N4 --> N5
     N5 --> USER
 
     N1 -.-> WRAPPER
-    N2 -.-> WRAPPER
     N3 -.-> WRAPPER
     N4 -.-> MEMORY
     N5 -.-> MEMORY
@@ -67,30 +67,29 @@ flowchart TB
 
 ---
 
-## 图 2：LangGraph 状态机流转（5 Node）
+## 图 2：LangGraph 状态机流转（4 Node + Conditional Edge）
 
-> 城际交通 + 日期计算在 **API 层预处理**，不在 LangGraph 图中。
-> 图从 `graph.invoke(state)` 开始，此时 State 已含所有预处理数据。
+> 城际交通 + 日期计算 + **天气查询**在 **API 层预处理**，不在 LangGraph 图中。
+> 图从 `graph.invoke(state)` 开始，此时 State 已含所有预处理数据（天气/城际/日期）。
 > Agent 内部的 Error-as-Observation（第 2 层）见图 6。
 
 ```mermaid
 stateDiagram-v2
     [*] --> AttractionNode: graph.invoke(state)
 
-    AttractionNode --> WeatherNode: 景点搜索完成
-    note right of AttractionNode: 失败时 status="failed"<br/>写入 error_log（Annotated[list, add]）<br/>不抛异常，下游继续
-
-    WeatherNode --> HotelNode: 天气查询完成
-    note right of WeatherNode: 失败时跳过<br/>写入 error_log<br/>规划阶段给通用穿衣建议
+    AttractionNode --> HotelNode: 景点搜索完成 + 中心计算
+    note right of AttractionNode: maps_geo 获取城市中心 → maps_around 20km 搜索<br/>本地 Python 计算景点群物理中心<br/>失败时 status="failed"<br/>写入 error_log（Annotated[list, add]）<br/>不抛异常，下游继续
 
     HotelNode --> MemoryNode: 酒店搜索完成
-    note right of HotelNode: 失败时跳过<br/>写入 error_log<br/>规划按预算推荐通用住宿
+    note right of HotelNode: 优先使用景点中心 nearby 搜索<br/>失败时退化全城搜索<br/>写入 error_log
 
     MemoryNode --> PlannerNode: 画像已注入 State
     note right of MemoryNode: 纯本地读取 MemoryManager<br/>trip_count ≥ 5 时画像有效<br/>不调 LLM / API
 
-    PlannerNode --> [*]: 返回 TripPlan JSON
-    note right of PlannerNode: 读 State 中各 status<br/>自动降级标注<br/>参考 user_profile 个性化<br/>前端展示 error_log 降级列表
+    PlannerNode --> PlannerNode: retry_planner（硬伤重生成, 最多 3 次）
+    PlannerNode --> HotelNode: retry_hotel（离群重算, 最多 2 次）
+    PlannerNode --> [*]: done → 返回 TripPlan JSON
+    note right of PlannerNode: 本地校验: 硬伤/软伤/离群检测<br/>离群景点 → 重算中心 → 回酒店重搜<br/>自动降级标注<br/>参考 user_profile 个性化
 ```
 
 ---
@@ -103,7 +102,6 @@ sequenceDiagram
     participant API as FastAPI（请求预处理）
     participant Graph as LangGraph
     participant Attr as 景点Node
-    participant Wthr as 天气Node
     participant Hotel as 酒店Node
     participant Mem as 记忆Node
     participant Plan as 规划Node
@@ -111,24 +109,22 @@ sequenceDiagram
 
     User->>API: POST /api/trip
 
-    Note over API: 🔧 API 层预处理<br/>① Python 本地 date_list 计算<br/>② 城际交通（高德 API + fallback）<br/>③ 写入记忆 + trip_count++
+    Note over API: 🔧 API 层预处理<br/>① Python 本地 date_list 计算<br/>② maps_weather 天气查询 + 格式化<br/>③ 城际交通（高德 API + fallback）<br/>④ 写入记忆 + trip_count++
 
-    API->>Graph: graph.invoke(state)<br/>(含 date_list + intercity_*)
+    API->>Graph: graph.invoke(state)<br/>(含 date_list + weather_data + intercity_*)
 
-    Note over Graph: 串行流水线<br/>LangGraph Edge 控制流转
+    Note over Graph: 串行流水线 + Conditional Edge
 
     Graph->>Attr: attraction_node(state)
-    Attr->>MCP: maps_text_search(景点, 城市)
+    Attr->>MCP: maps_geo(城市) → 获取中心坐标
+    MCP-->>Attr: JSON 坐标
+    Attr->>MCP: maps_around(景点, center, radius=20km)
     MCP-->>Attr: JSON 景点数据
-    Attr-->>Graph: state.attraction_data<br/>+ attraction_status<br/>+ error_log（失败时）
-
-    Graph->>Wthr: weather_node(state)
-    Wthr->>MCP: maps_weather(城市)
-    MCP-->>Wthr: JSON 天气数据
-    Wthr-->>Graph: state.weather_data<br/>+ weather_status<br/>+ error_log（失败时）
+    Note over Attr: 本地 Python 计算<br/>景点群物理中心（质心）
+    Attr-->>Graph: state.attraction_data<br/>+ center_lng/center_lat<br/>+ attraction_coords<br/>+ error_log（失败时）
 
     Graph->>Hotel: hotel_node(state)
-    Hotel->>MCP: maps_text_search(酒店, 城市)
+    Hotel->>MCP: maps_around(酒店, center=景点中心)
     MCP-->>Hotel: JSON 酒店数据
     Hotel-->>Graph: state.hotel_data<br/>+ hotel_status<br/>+ error_log（失败时）
 
@@ -137,11 +133,13 @@ sequenceDiagram
     Mem-->>Graph: state.user_profile
 
     Graph->>Plan: planner_node(state)
-    Note over Plan: 整合: 景点+天气+酒店+画像<br/>降级标注: 根据 status<br/>个性化: 参考 user_profile<br/>城际交通: 从 State 读取
+    Note over Plan: 整合: 景点+天气+酒店+画像<br/>本地校验: 硬伤/软伤检测<br/>离群检测: 标准差法+80km硬上限<br/>画像指令注入: 预算/饮食/住宿
 
-    alt 数据正常
-        Plan-->>Graph: state.final_plan (完整行程)
-    else 部分缺失
+    alt 硬伤 & retry < 3
+        Plan-->>Graph: planner_route = "retry_planner" → 自回环
+    else 离群景点 & hotel_retry < 2
+        Plan-->>Graph: planner_route = "retry_hotel" → 回酒店用新中心
+    else 合格 / 重试耗尽
         Plan-->>Graph: state.final_plan (含降级标注)
     end
 
@@ -151,7 +149,7 @@ sequenceDiagram
 
 ---
 
-## 图 4：工具架构 — Wrapper 模式 + add_tool() 注册
+## 图 4：工具架构 — Wrapper 模式 + 坐标增强 + 并发 maps_geo
 
 ```mermaid
 flowchart LR
@@ -163,9 +161,17 @@ flowchart LR
         MCPSRV["amap-mcp-server<br/>uvx 启动子进程<br/>JSON-RPC over stdio<br/>16 个工具自动发现"]
     end
 
+    subgraph GeoEnhance["坐标增强（attraction_node 内部）"]
+        direction TB
+        GEO1["maps_geo: 城市→中心坐标<br/>（lng, lat）"]
+        GEO2["maps_around: 以中心 20km 半径<br/>搜索景点（限制范围）"]
+        GEO3["本地 Python 计算<br/>景点群物理中心（质心）"]
+        GEO1 --> GEO2 --> GEO3
+    end
+
     subgraph WrapperLayer["AmapToolWrapper（1 个 Tool，3 层内部处理）"]
         direction TB
-        L1["第 1 层: MCP 调用<br/>maps_text_search<br/>maps_weather"]
+        L1["第 1 层: MCP 调用<br/>maps_text_search<br/>maps_around"]
         L2["第 2 层: Format<br/>JSON→结构化文本<br/>纯 Python，不调 LLM"]
         L3["第 3 层: Validate<br/>完整性检查+默认值<br/>纯 Python"]
         L1 --> L2 --> L3
@@ -178,17 +184,16 @@ flowchart LR
     subgraph AgentLayer["Agent 层（add_tool() 注册）"]
         direction TB
         A1["景点 Agent<br/>SimpleAgent<br/>add_tool(mcp_tool)"]
-        A2["天气 Agent<br/>SimpleAgent<br/>add_tool(mcp_tool)"]
         A3["酒店 Agent<br/>SimpleAgent<br/>add_tool(mcp_tool)"]
         A4["规划 Agent<br/>SimpleAgent<br/>（无工具，纯推理）"]
     end
 
     AMAP -->|"HTTP API"| MCPSRV
     MCPSRV -->|"共享 MCPTool 实例<br/>（只建一次连接）"| A1
-    MCPSRV -->|"共享 MCPTool 实例"| A2
     MCPSRV -->|"共享 MCPTool 实例"| A3
     L3 -.->|"Wrapper 模式<br/>（可选封装）"| A1
 
+    style GeoEnhance fill:#d0ebff,stroke:#1c7ed6
     style WrapperLayer fill:#c3fae8,stroke:#0c8599
     style FallbackLayer fill:#fff3cd,stroke:#ffc107
     style AgentLayer fill:#b2f2bb,stroke:#2b8a3e
@@ -245,11 +250,12 @@ flowchart TB
 
 ---
 
-## 图 6：错误恢复 — 两层协同 + error_log 累积
+## 图 6：错误恢复 — 三层协同 + error_log 累积 + Conditional Edge 重试
 
-> **图级** Conditional Routing（第 4 层）→ 见图 2。节点间路由，读 status 决定下一跳。
+> **图级** Conditional Routing（第 4 层）→ 见图 2。planner 执行后根据 `_validate_and_refine()` 结果路由。
 > **Agent 级** Error-as-Observation（第 2 层）→ 本图。Agent 内部处理工具调用失败。
 > **累积机制** error_log: Annotated[list, add] — LangGraph 自动合并所有 Node 的降级信息。
+> **重试上限** planner 硬伤最多重试 3 次（MAX_RETRY），hotel 离群重算最多 2 次（MAX_HOTEL_RETRY）。
 
 ```mermaid
 flowchart LR
@@ -276,6 +282,22 @@ flowchart LR
         GFAIL --> GEDGE --> ACCUM --> API_RET
     end
 
+    subgraph CondRetry["Conditional Edge 重试（planner 路由）"]
+        direction TB
+        CR1["retry_planner<br/>硬伤重生成<br/>最多 3 次（MAX_RETRY=3）"]
+        CR2["retry_hotel<br/>离群景点 → 重算中心<br/>回酒店用新中心重搜<br/>最多 2 次（MAX_HOTEL_RETRY=2）"]
+        CR3["done<br/>校验通过 / 重试耗尽<br/>→ END"]
+        CR1 --- CR2 --- CR3
+    end
+
+    subgraph OutlierDetect["离群检测（planner_node 内置）"]
+        direction TB
+        OD1["标准差法: distance > mean + 1.5σ"]
+        OD2["硬上限: >80km 直接排除"]
+        OD3["排除离群 → 重算质心<br/>→ 触发 retry_hotel"]
+        OD1 --- OD2 --- OD3
+    end
+
     subgraph FallbackPanel["前端降级列表面板"]
         FP["6 维度标签<br/>+ 出行方式选择<br/>+ 降级列表展示<br/>（来自 error_log）"]
     end
@@ -283,8 +305,11 @@ flowchart LR
     RETRY -.->|"重试成功"| DONE
     RETRY -.->|"多次失败"| FB["FallbackTool<br/>生成降级模板"]
     API_RET -.-> FP
+    CondRetry -.-> OutlierDetect
 
     style ACCUM fill:#c3fae8,stroke:#0c8599
+    style CondRetry fill:#d0bfff,stroke:#6741d9
+    style OutlierDetect fill:#fff3cd,stroke:#ffc107
     style FallbackPanel fill:#fff3cd,stroke:#ffc107
 ```
 
@@ -296,7 +321,7 @@ flowchart LR
 flowchart LR
     subgraph L5["第 5 层: 多智能体编排"]
         direction TB
-        N5["TripPlanner LangGraph<br/>5 个 Node:<br/>attraction→weather→hotel<br/>→memory→planner"]
+        N5["TripPlanner LangGraph<br/>4 个 Node:<br/>attraction→hotel<br/>→memory→planner<br/>+ Conditional Edge"]
     end
 
     subgraph L4["第 4 层: 图编排框架"]
@@ -321,7 +346,7 @@ flowchart LR
 
     subgraph L0["第 0 层: API 预处理"]
         direction TB
-        N0["FastAPI trip.py<br/>日期本地预计算<br/>城际交通计算<br/>记忆写入 + trip_count++"]
+        N0["FastAPI trip.py<br/>日期本地预计算<br/>天气查询（maps_weather）<br/>城际交通计算<br/>记忆写入 + trip_count++"]
     end
 
     N1 --> N2 --> N3 --> N4 --> N5 --> N0
@@ -337,4 +362,4 @@ flowchart LR
 ---
 
 _定位: `/home/caoruixin/projects/tripplanner/ARCHITECTURE.md`_
-_最后更新: 2026-07-20 — 与实际代码对齐_
+_最后更新: 2026-07-21 — 4 Node + Conditional Edge + 离群检测（与实际代码对齐）_

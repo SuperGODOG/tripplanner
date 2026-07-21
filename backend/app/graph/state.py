@@ -24,10 +24,27 @@ class TripPlannerState(TypedDict, total=False):
     weather_data: str
     hotel_data: str
 
+    # ── 空间计算（attraction_node 产出）──
+    center_lng: float             # 景点群物理中心经度
+    center_lat: float             # 景点群物理中心纬度
+    attraction_coords: list       # [{name, lng, lat}, ...]
+
+    # ── 中心覆写（planner 离群检测后产出）──
+    center_lng_override: float    # 去掉离群景点后新中心经度
+    center_lat_override: float    # 去掉离群景点后新中心纬度
+
+    # ── 重试计数器 ──
+    planner_retry_count: int      # Planner 自回环计数
+    hotel_retry_count: int        # Hotel 回环计数（离群重算）
+
     # ── 状态标记 ──
     attraction_status: str
     weather_status: str
     hotel_status: str
+
+    # ── Planner 回环控制 ──
+    planner_route: str                 # "done" / "retry_planner" / "retry_hotel"
+    planner_retry_count: int           # Planner 重试计数（最多 3 次）
 
     # ── 最终输出 ──
     final_plan: dict

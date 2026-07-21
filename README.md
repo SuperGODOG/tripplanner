@@ -1,13 +1,13 @@
 # 🧳 TripPlanner
 
 > 基于 LangGraph + ReAct 自研编排的多智能体旅行规划系统
-> 5 Node StateGraph · MCP 协议 · 五因子权重记忆 · 双轨异常检测
+> 4 Node StateGraph · MCP 协议 · 五因子权重记忆 · 双轨异常检测
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.2-purple)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.139-green)](https://fastapi.tiangolo.com/)
 
-输入出发地 + 目的地 + 偏好 → 4 个 Agent 协作生成完整旅行计划（景点/天气/酒店/预算），用户画像随使用次数渐进构建。
+输入出发地 + 目的地 + 偏好 → 3 个 Agent 协作生成完整旅行计划（景点/酒店/预算），天气+城际交通在 API 层预处理，景点离群检测自动过滤远郊景点，用户画像随使用次数渐进构建。
 
 ---
 
@@ -104,12 +104,12 @@ print('行程计数已重置')
 ### 分层架构
 
 ```
-第 5 层  多智能体编排     ← 5 Node LangGraph
-第 4 层  图编排框架       ← StateGraph / Edge / Checkpoint
+第 5 层  多智能体编排     ← 4 Node LangGraph + Conditional Edge
+第 4 层  图编排框架       ← StateGraph / Edge / Conditional / Checkpoint
 第 3 层  框架封装         ← HelloAgents SimpleAgent
 第 2 层  Agent 内循环     ← ReAct (Error-as-Observation)
 第 1 层  裸 LLM 调用      ← DeepSeek API
-第 0 层  API 预处理       ← 日期计算 / 城际交通 / 记忆写入
+第 0 层  API 预处理       ← 日期计算 / 天气查询 / 城际交通 / 记忆写入
 ```
 
 ### 数据流向
@@ -119,16 +119,20 @@ POST /api/trip
   │
   ├─ API 预处理层
   │   ├─ 日期列表本地计算（Python，不交 LLM）
+  │   ├─ 天气查询（maps_weather 直接调用）
   │   ├─ 城际交通（maps_geo → maps_distance → 费用估算）
   │   └─ 写入记忆（trip_count++）
   │
   └─ graph.invoke(state)
        │
-       ├─ Node 1: attraction    景点 Agent + MCP
-       ├─ Node 2: weather       天气 Agent + MCP
-       ├─ Node 3: hotel         酒店 Agent + MCP
-       ├─ Node 4: memory        加载用户画像（纯本地）
-       └─ Node 5: planner       整合数据 + 画像 → JSON
+       ├─ Node 1: attraction    ① maps_geo → 城市中心  ② maps_around 20km 搜索景点  ③ 本地 Python 计算景点群质心
+       ├─ Node 2: hotel         使用景点质心 nearby 搜索酒店
+       ├─ Node 3: memory        加载用户画像（纯本地）
+       └─ Node 4: planner       整合数据 + 本地校验（硬伤/软伤/离群检测）→ JSON
+            │
+            ├─ retry_planner: 硬伤重生成（最多 3 次）
+            ├─ retry_hotel:   离群景点 → 重算中心 → 回酒店重搜（最多 2 次）
+            └─ done:          输出最终计划
             │
             └─ 降级检测: 所有 error_log 累积 → 前端列表展示
 ```
@@ -173,26 +177,29 @@ final_weight = domain × decay × interaction × frequency_boost × outlier_pena
 
 **画像维度（8 维）：** 出行方式 / 距离偏好 / 住宿 / 预算 / 饮食 / 交通 / 节奏 / 兴趣
 
-### 扩展: Agent 反馈环
+### 扩展: Agent 反馈环与离群检测
 
-当前图是 5 Node 线性流: `attraction → weather → hotel → memory → planner → END`。但 LangGraph 的 `conditional edge` 机制天然支持循环——这是图结构（状态机）相对于传统顺序调用的核心优势。
+当前图是 4 Node + Conditional Edge 流: `attraction → hotel → memory → planner → [retry_planner / retry_hotel / done]`。
 
-例如：如果 Planner 发现酒店不匹配景点位置或预算，可以通过 conditional edge 回到 hotel Agent 重新搜索：
+**已实现的 Conditional Edge 路由：**
 
-```python
-graph.add_conditional_edges("planner", check_status, {
-    "retry_hotel": "hotel",
-    "done": END
-})
-```
+| 路由 | 触发条件 | 行为 | 上限 |
+|------|---------|------|------|
+| `retry_planner` | 硬伤（缺字段/景点<2/预算超30%） | planner 自回环重生成 | MAX_RETRY=3 |
+| `retry_hotel` | 离群景点（标准差 > mean+1.5σ 或 >80km） | 重算中心 → hotel 重搜 | MAX_HOTEL_RETRY=2 |
+| `done` | 校验通过或重试耗尽 | → END | — |
 
-只需改一行代码即可实现 Agent 间反馈环，无需重构整个流程。
+**离群检测双轮过滤：**
+1. **硬上限（80km）**：景点到群中心距离 >80km → 直接排除（非城市景点）
+2. **标准差法（1.5σ）**：距离 > mean + 1.5×σ → 标记离群 → 排除后重算质心 → 触发 retry_hotel
+
+LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓扑层面的路由配置，无需改动 Node 内部逻辑。
 
 ---
 
 ## 🔮 后续更新计划
 
-- [ ] **Conditional Edge 完善**：当前为 linear graph，加入真正的 LangGraph conditional routing（节点失败→自动跳转降级路径）
+- [x] **Conditional Edge 实现**：retry_planner（硬伤重生成 3 次）+ retry_hotel（离群重算 2 次）已上线
 - [ ] **多用户支持**：记忆模块加入用户隔离（当前为单用户模式）
 - [ ] **向量化记忆检索**：当前为关键词匹配，升级为 embedding + 向量相似度（适合"用户之前去杭州时喜欢什么类型"这类语义查询）
 - [ ] **流式响应 (SSE)**：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度
@@ -215,7 +222,7 @@ tripplanner/
 └── backend/
     ├── app/
     │   ├── agents/              # 4 SimpleAgent
-    │   ├── graph/               # 5 Node StateGraph
+    │   ├── graph/               # 4 Node StateGraph + Conditional Edge
     │   ├── tools/               # AmapToolWrapper + FallbackTool
     │   ├── memory/              # 五因子 + 双轨异常检测
     │   ├── api/                 # FastAPI + 城际交通预处理

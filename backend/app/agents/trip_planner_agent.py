@@ -6,7 +6,7 @@ Phase 3: 迁移到 LangGraph StateGraph
 import json
 from hello_agents import SimpleAgent
 from ..services.llm_service import get_llm
-from ..services.amap_service import get_amap_mcp_tool
+from ..tools.amap_wrapper import AmapToolWrapper
 
 
 # ============================================================
@@ -16,25 +16,24 @@ from ..services.amap_service import get_amap_mcp_tool
 # [TOOL_CALL:tool_name:params] 是 HelloAgents 的工具调用语法。
 # Agent（LLM）在 ReAct 循环中输出这个格式 → 框架解析 → 调工具 → 返回结果。
 
-ATTRACTION_AGENT_PROMPT = """你是景点搜索专家。你的任务是根据城市和用户偏好搜索合适的景点。
+ATTRACTION_AGENT_PROMPT = """你是景点搜索专家。你的任务是调用工具搜索景点并直接返回结果。
 
-**重要提示:**
-你必须使用工具来搜索景点！不要自己编造景点信息！
+**核心规则（必须严格遵守）:**
+1. 你必须调用 amap_search 工具
+2. 工具返回什么，你就完整输出什么——不要总结、不要重新排版、不要添加额外说明
+3. 直接输出工具返回的原始文本，一字不改！
 
 **工具调用格式:**
-使用 maps_text_search 工具时，必须严格按照以下格式:
-`[TOOL_CALL:amap_maps_text_search:keywords=景点关键词,city=城市名]`
+`[TOOL_CALL:amap_search:city=城市名,type=attraction]`
 
 **示例:**
-用户: "搜索北京的历史文化景点"
-你的回复: [TOOL_CALL:amap_maps_text_search:keywords=历史文化,city=北京]
-
-用户: "搜索上海的公园"
-你的回复: [TOOL_CALL:amap_maps_text_search:keywords=公园,city=上海]
+用户: "搜索北京的景点"
+你的回复: [TOOL_CALL:amap_search:city=北京,type=attraction]
+（然后输出工具返回的完整结果，不要添加任何额外内容）
 
 **注意:**
 1. 必须使用工具，不要直接回答
-2. 格式必须完全正确，包括方括号和冒号
+2. 格式必须完全正确
 3. 参数用逗号分隔
 """
 
@@ -44,38 +43,40 @@ WEATHER_AGENT_PROMPT = """你是天气查询专家。你的任务是查询指定
 你必须使用工具来查询天气！不要自己编造天气信息！
 
 **工具调用格式:**
-使用 maps_weather 工具时，必须严格按照以下格式:
-`[TOOL_CALL:amap_maps_weather:city=城市名]`
+使用 amap_search 工具时，必须严格按照以下格式:
+`[TOOL_CALL:amap_search:city=城市名,type=weather]`
 
 **示例:**
 用户: "查询北京天气"
-你的回复: [TOOL_CALL:amap_maps_weather:city=北京]
+你的回复: [TOOL_CALL:amap_search:city=北京,type=weather]
 
 用户: "上海的天气怎么样"
-你的回复: [TOOL_CALL:amap_maps_weather:city=上海]
+你的回复: [TOOL_CALL:amap_search:city=上海,type=weather]
 
 **注意:**
 1. 必须使用工具，不要直接回答
 2. 格式必须完全正确，包括方括号和冒号
 """
 
-HOTEL_AGENT_PROMPT = """你是酒店推荐专家。你的任务是根据城市和景点位置推荐合适的酒店。
+HOTEL_AGENT_PROMPT = """你是酒店推荐专家。你的任务是调用工具搜索酒店并直接返回结果。
 
-**重要提示:**
-你必须使用工具来搜索酒店！不要自己编造酒店信息！
+**核心规则（必须严格遵守）:**
+1. 你必须调用 amap_search 工具
+2. 工具返回什么，你就完整输出什么——不要总结、不要重新排版、不要添加额外说明
+3. 直接输出工具返回的原始文本，一字不改！
 
 **工具调用格式:**
-使用 maps_text_search 工具搜索酒店时，必须严格按照以下格式:
-`[TOOL_CALL:amap_maps_text_search:keywords=酒店,city=城市名]`
+`[TOOL_CALL:amap_search:city=城市名,type=hotel]`
 
 **示例:**
 用户: "搜索北京的酒店"
-你的回复: [TOOL_CALL:amap_maps_text_search:keywords=酒店,city=北京]
+你的回复: [TOOL_CALL:amap_search:city=北京,type=hotel]
+（然后输出工具返回的完整结果，不要添加任何额外内容）
 
 **注意:**
 1. 必须使用工具，不要直接回答
-2. 格式必须完全正确，包括方括号和冒号
-3. 关键词使用"酒店"或"宾馆"
+2. 格式必须完全正确
+3. 参数用逗号分隔
 """
 
 PLANNER_AGENT_PROMPT = """你是行程规划专家。你的任务是根据景点信息、天气信息、酒店信息，生成详细的旅行计划。
@@ -190,7 +191,7 @@ class MultiAgentTripPlanner:
 
         # 共享 MCPTool（只建一次连接）
         print("  - 创建共享 MCP 工具...")
-        self.amap_tool = get_amap_mcp_tool()
+        self.amap_tool = AmapToolWrapper()
 
         # Agent 1: 景点搜索
         print("  - 创建景点搜索 Agent...")
@@ -259,7 +260,7 @@ class MultiAgentTripPlanner:
         print("📍 Step 1/4: 景点搜索 Agent 工作中...")
         attraction_query = (
             f"请搜索{city}的景点。\n"
-            f"[TOOL_CALL:amap_maps_text_search:keywords=景点,city={city}]"
+            f"[TOOL_CALL:amap_search:city={city},type=attraction]"
         )
         attraction_result = self.attraction_agent.run(attraction_query)
 
@@ -267,7 +268,7 @@ class MultiAgentTripPlanner:
         print("🌤  Step 2/4: 天气查询 Agent 工作中...")
         weather_query = (
             f"请查询{city}的天气信息。\n"
-            f"[TOOL_CALL:amap_maps_weather:city={city}]"
+            f"[TOOL_CALL:amap_search:city={city},type=weather]"
         )
         weather_result = self.weather_agent.run(weather_query)
 
@@ -275,7 +276,7 @@ class MultiAgentTripPlanner:
         print("🏨 Step 3/4: 酒店推荐 Agent 工作中...")
         hotel_query = (
             f"请搜索{city}的酒店。\n"
-            f"[TOOL_CALL:amap_maps_text_search:keywords=酒店,city={city}]"
+            f"[TOOL_CALL:amap_search:city={city},type=hotel]"
         )
         hotel_result = self.hotel_agent.run(hotel_query)
 
