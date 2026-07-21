@@ -202,10 +202,10 @@ LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓
 - [x] **Conditional Edge 实现**：retry_planner（硬伤重生成 3 次）+ retry_hotel（离群重算 2 次）已上线
 - [ ] **多用户支持**：记忆模块加入用户隔离（当前为单用户模式）
 - [ ] **向量化记忆检索**：当前为关键词匹配，升级为 embedding + 向量相似度（适合"用户之前去杭州时喜欢什么类型"这类语义查询）
-- [ ] **流式响应 (SSE)**：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度
+- [x] **流式响应 (SSE)**：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度
 - [ ] **多 LLM 提供商**：支持 OpenAI / Claude / 本地模型切换
 - [ ] **A2A 协议集成**：Agent-to-Agent 通信，支持跨系统 Agent 协作
-- [ ] **前端重构**：从单文件 HTML 迁移到 React/Vue 组件化
+- [x] **前端重构**：从单文件 HTML 迁移到 React/Vue 组件化
 - [ ] **Docker 部署**：提供 Dockerfile + docker-compose，一键启动全部服务
 - [ ] **自动化测试**：pytest 覆盖各 Node 的单元测试 + 集成测试
 
