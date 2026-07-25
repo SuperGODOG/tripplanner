@@ -27,7 +27,9 @@ flowchart TB
         EDGE["Edge: attraction→hotel→memory→planner"]
         COND["Conditional: planner → retry_planner / retry_hotel / done"]
         ERRLOG["error_log: Annotated[list, add]<br/>所有 Node 降级写入，自动累积"]
-        CHECKPOINT["Checkpoint: 每步 State 自动快照"]
+        CHECKPOINT["Checkpoint: SqliteSaver 持久化<br/>data/checkpoints.db<br/>进程重启后断点续传"]
+        RETRY["LLM 退避重试: _run_agent_with_retry()<br/>指数退避 1s→2s→4s + jitter"]
+        CANCEL["SSE 取消传播: cancel_event<br/>前端断开 → 中止后台线程"]
     end
 
     subgraph Layer3["第 3 层: 框架封装 (HelloAgents)"]
@@ -46,10 +48,11 @@ flowchart TB
         direction LR
         WRAPPER["AmapToolWrapper<br/>内部 3 层: MCP→Format→Validate<br/>（Agent 只看到 1 个 Tool）"]
         FALLBACK["FallbackTool<br/>API 全挂时兜底<br/>纯本地生成"]
+        MCPTIMEOUT["MCP 超时保护<br/>_mcp_run_with_timeout()<br/>10s 超时兜底"]
     end
 
     subgraph MemoryLayer["记忆层"]
-        MEMORY["MemoryManager<br/>五因子权重 + 双轨异常检测<br/>数值型 IQR + 分类型频率比<br/>trip_count ≥ 5 才显示画像"]
+        MEMORY["MemoryManager<br/>五因子权重 + 双轨异常检测<br/>数值型 IQR + 分类型频率比<br/>trip_count ≥ 5 才显示画像<br/>add() 去重: 连续相同记录跳过"]
     end
 
     USER["POST /api/trip<br/>城市 + 天数 + 偏好"] --> PRE1 & PRE2 & PRE3
@@ -250,12 +253,13 @@ flowchart TB
 
 ---
 
-## 图 6：错误恢复 — 三层协同 + error_log 累积 + Conditional Edge 重试
+## 图 6：错误恢复 — 三层协同 + error_log 累积 + Conditional Edge 重试 + Interrupt 容错
 
 > **图级** Conditional Routing（第 4 层）→ 见图 2。planner 执行后根据 `_validate_and_refine()` 结果路由。
 > **Agent 级** Error-as-Observation（第 2 层）→ 本图。Agent 内部处理工具调用失败。
 > **累积机制** error_log: Annotated[list, add] — LangGraph 自动合并所有 Node 的降级信息。
 > **重试上限** planner 硬伤最多重试 3 次（MAX_RETRY），hotel 离群重算最多 2 次（MAX_HOTEL_RETRY）。
+> **Interrupt 容错** SqliteSaver 持久化 + LLM 退避重试 + MCP 超时 + SSE 取消传播 + 记忆去重（~200 行新增）。
 
 ```mermaid
 flowchart LR
@@ -298,6 +302,17 @@ flowchart LR
         OD1 --- OD2 --- OD3
     end
 
+    subgraph InterruptResilient["Interrupt 容错（6 项落地）"]
+        direction TB
+        IR1["SqliteSaver: Checkpoint 持久化<br/>data/checkpoints.db<br/>进程重启后断点续传"]
+        IR2["LLM 退避重试: _run_agent_with_retry()<br/>指数退避 1s→2s→4s + jitter"]
+        IR3["MCP 超时: _mcp_run_with_timeout()<br/>ThreadPool + 10s 超时"]
+        IR4["SSE 取消: cancel_event<br/>前端断开 → 中止后台线程"]
+        IR5["记忆去重: add()<br/>连续相同记录跳过"]
+        IR6["thread_id: config 参数<br/>Checkpoint 断点续传前置条件"]
+        IR1 --- IR2 --- IR3 --- IR4 --- IR5 --- IR6
+    end
+
     subgraph FallbackPanel["前端降级列表面板"]
         FP["6 维度标签<br/>+ 出行方式选择<br/>+ 降级列表展示<br/>（来自 error_log）"]
     end
@@ -310,6 +325,7 @@ flowchart LR
     style ACCUM fill:#c3fae8,stroke:#0c8599
     style CondRetry fill:#d0bfff,stroke:#6741d9
     style OutlierDetect fill:#fff3cd,stroke:#ffc107
+    style InterruptResilient fill:#e8f5e9,stroke:#2e7d32
     style FallbackPanel fill:#fff3cd,stroke:#ffc107
 ```
 
@@ -362,4 +378,4 @@ flowchart LR
 ---
 
 _定位: `/home/caoruixin/projects/tripplanner/ARCHITECTURE.md`_
-_最后更新: 2026-07-21 — 4 Node + Conditional Edge + 离群检测（与实际代码对齐）_
+_最后更新: 2026-07-25 — 4 Node + Conditional Edge + 离群检测 + Interrupt 容错升级（SqliteSaver/退避重试/MCP超时/SSE取消/记忆去重/thread_id）_

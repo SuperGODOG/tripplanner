@@ -202,7 +202,22 @@ START → attraction → hotel → memory → planner → [conditional]
 | `retry_hotel` | 离群景点→重算中心 | hotel Node 重搜 | MAX_HOTEL_RETRY=2 |
 | `done` | 校验通过 or 重试耗尽 | END | — |
 
-### 4.3 4 Node 分工详表
+### 4.3 Interrupt 容错升级（~200 行新增，零删除）
+
+Phase 3 后期进行了 6 项 interrupt-resilient 升级，确保 Agent 在被中断（LLM 超时、MCP 挂断、用户取消、进程重启）后能可靠恢复：
+
+| # | 能力 | 位置 | 实现 |
+|---|------|------|------|
+| 1 | **SQLite Checkpoint 持久化** | `builder.py` | SqliteSaver 替代默认 MemorySaver，存到 `data/checkpoints.db`。进程重启后相同 thread_id 从上次断点继续，不重跑已完成 Node |
+| 2 | **LLM 退避重试** | `trip_planner_agent.py: _run_agent_with_retry()` | 指数退避（1s→2s→4s）+ jitter，处理 API 超时/限流/500。`nodes.py` 中 5 处 LLM 调用全部切换为 retry 版本 |
+| 3 | **MCP 超时保护** | `amap_wrapper.py: _mcp_run_with_timeout()` | ThreadPool 包装 MCP 调用，10s 超时兜底，避免 MCP 子进程挂死阻塞整个 Node |
+| 4 | **记忆去重** | `memory/manager.py: add()` | 写入前检查最近一条记录的 content，相同则跳过。防止 error_log 重复追加和相同偏好重复写入 |
+| 5 | **SSE 取消传播** | `trip.py` | `cancel_event` + `try/except CancelledError`。前端 SSE 断开时立即中止后台 `graph.invoke()` 线程，避免白跑完整 4 Agent 流程 |
+| 6 | **thread_id 配置** | `trip.py` | `graph.invoke(state, config={"configurable": {"thread_id": ...}})`，Checkpoint 断点续传的前置条件 |
+
+**设计原则**：先防崩溃（thread_id + SqliteSaver），再省资源（cancel 传播 + retry 退避），最后去噪音（记忆去重）。所有改动纯增量，不破坏现有 Node 逻辑。
+
+### 4.4 4 Node 分工详表
 
 | Node | 类型 | 调 LLM | 调 MCP | 职责 |
 |------|------|--------|--------|------|
