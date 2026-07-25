@@ -209,6 +209,15 @@ LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓
 - [ ] **Docker 部署**：提供 Dockerfile + docker-compose，一键启动全部服务
 - [ ] **自动化测试**：pytest 覆盖各 Node 的单元测试 + 集成测试
 
+### 容错与恢复（已落地）
+
+- **LangGraph Checkpoint**: SQLite 持久化（`data/checkpoints.db`），进程重启后断点续传
+- **LLM 退避重试**: 指数退避 max 3 次（1s → 2s → 4s）
+- **MCP 调用超时**: 10s timeout 保护（`amap_wrapper.py`）
+- **记忆去重**: 连续相同记录跳过写入
+- **SSE 取消传播**: 客户端断开后后台线程感知取消信号
+- 总计 ~200 行新增，零删除
+
 ---
 
 ## 📁 项目结构
