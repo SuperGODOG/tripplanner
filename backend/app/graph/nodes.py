@@ -38,13 +38,13 @@ def attraction_node(state: TripPlannerState) -> dict:
         if center_lng and center_lat:
             center = f"{center_lng},{center_lat}"
             print(f"🗺️  [景点搜索] 城市中心 ({center_lng},{center_lat})，使用 maps_around radius=20km")
-            result = planner.attraction_agent.run(
+            result = planner._run_agent_with_retry(planner.attraction_agent,
                 f"请搜索{city}的{kw}相关景点。\n"
                 f"[TOOL_CALL:amap_search:city={city},type=around,keywords={kw},center={center},radius=20000]"
             )
         else:
             print(f"⚠️  [景点搜索] maps_geo 失败，退化全城 text_search")
-            result = planner.attraction_agent.run(
+            result = planner._run_agent_with_retry(planner.attraction_agent,
                 f"请搜索{city}的{kw}相关景点。\n"
                 f"[TOOL_CALL:amap_search:city={city},type=attraction,keywords={kw}]"
             )
@@ -83,14 +83,14 @@ def hotel_node(state: TripPlannerState) -> dict:
             override = state.get("center_lng_override")
             tag = "覆写中心" if override else "原始中心"
             print(f"🏨 [酒店搜索] 使用{tag} center=({clng},{clat})")
-            result = planner.hotel_agent.run(
+            result = planner._run_agent_with_retry(planner.hotel_agent,
                 f"请以坐标({clng},{clat})为中心搜索{city}的酒店。\n"
                 f"[TOOL_CALL:amap_search:city={city},type=around,center={clng},{clat},keywords=酒店]"
             )
         else:
             # 退化为全城搜索
             print(f"🏨 [酒店搜索] 无中心坐标，退化为全城搜索")
-            result = planner.hotel_agent.run(
+            result = planner._run_agent_with_retry(planner.hotel_agent,
                 f"请搜索{city}的酒店。\n[TOOL_CALL:amap_search:city={city},type=hotel]"
             )
         _emit("hotel", "done", {"status": "success"})
@@ -411,7 +411,7 @@ def planner_node(state: TripPlannerState) -> dict:
 {('【注意】' + '; '.join(warnings) if warnings else '')}
 """
     planner = get_planner()
-    result = planner.planner_agent.run(query)
+    result = planner._run_agent_with_retry(planner.planner_agent, query)
     plan = planner._parse_plan(result)
 
     # ── 本地校验/离群检测/画像指令注入 ──
