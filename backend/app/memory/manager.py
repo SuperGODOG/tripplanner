@@ -47,6 +47,12 @@ class MemoryManager:
           "confirm" — 用户确认过的（权重 +0.2）
           "modify"  — 用户主动修改的（权重 +0.5）
         """
+        # ── 去重: 最近一条记录与当前内容相同时跳过 ──
+        if self._entries:
+            last = self._entries[-1]
+            if last.content == text:
+                return last
+
         now = datetime.now().isoformat()
 
         entry = MemoryEntry(

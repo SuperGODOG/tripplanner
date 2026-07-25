@@ -67,7 +67,8 @@ async def plan_trip(request: TripRequest):
             "user_profile": {},
         }
 
-        result = graph.invoke(state)
+        config = {"configurable": {"thread_id": f"trip_{request.city}_{start}"}}
+        result = graph.invoke(state, config)
         plan_data = result.get("final_plan", {})
         errors = result.get("error_log", [])
 
@@ -96,7 +97,7 @@ async def plan_trip_stream(
     preferences: str = "",  # comma-separated
 ):
     """SSE 流式端点——前端实时看到每个 Node 进度"""
-    import json, asyncio, queue
+    import json, asyncio, queue, threading
     from ..graph.events import SSEEmitter
     from ..graph.nodes import set_emitter
 
@@ -141,37 +142,49 @@ async def plan_trip_stream(
             set_emitter(emitter)
             graph = get_trip_graph()
 
+            config = {"configurable": {"thread_id": f"trip_{city}_{start}"}}
+            cancel_event = threading.Event()
+            result = None
+
             # 在 executor 中运行同步 graph.invoke()，避免阻塞事件循环
             import concurrent.futures
             loop = asyncio.get_running_loop()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = loop.run_in_executor(pool, lambda: graph.invoke(state))
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = loop.run_in_executor(
+                        pool,
+                        lambda: graph.invoke(state, config) if not cancel_event.is_set() else None
+                    )
 
-                # 轮询：从线程安全 queue 中取事件，逐个 yield
-                while not future.done():
-                    drained = False
-                    while True:
+                    # 轮询：从线程安全 queue 中取事件，逐个 yield
+                    while not future.done():
+                        drained = False
+                        while True:
+                            try:
+                                event = emitter.get_nowait()
+                                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                                drained = True
+                            except queue.Empty:
+                                break
+                        # 有事件时立即继续轮询（无延迟），无事件时才 sleep 50ms
+                        if drained:
+                            await asyncio.sleep(0)
+                        else:
+                            await asyncio.sleep(0.05)
+
+                    # 排空残余事件（graph 已完成，最后再排一次）
+                    while not emitter.empty():
                         try:
                             event = emitter.get_nowait()
                             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                            drained = True
                         except queue.Empty:
                             break
-                    # 有事件时立即继续轮询（无延迟），无事件时才 sleep 50ms
-                    if drained:
-                        await asyncio.sleep(0)
-                    else:
-                        await asyncio.sleep(0.05)
 
-                # 排空残余事件（graph 已完成，最后再排一次）
-                while not emitter.empty():
-                    try:
-                        event = emitter.get_nowait()
-                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    except queue.Empty:
-                        break
-
-                result = future.result()
+                    result = future.result()
+            except asyncio.CancelledError:
+                cancel_event.set()
+                yield f"data: {json.dumps({'node': 'cancelled', 'status': 'cancelled', 'data': {}}, ensure_ascii=False)}\n\n"
+                return
             set_emitter(None)
 
             # 最终结果
