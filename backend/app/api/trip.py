@@ -1,5 +1,6 @@
 """旅行规划 API"""
 import json, re, traceback
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -27,11 +28,13 @@ async def plan_trip(request: TripRequest):
         start = request.start_date or date.today().isoformat()
         date_list = [(date.fromisoformat(start) + timedelta(days=i)).isoformat() for i in range(request.days)]
 
-        # ── 城际交通计算（API 层，不占 LangGraph Node） ──
-        intercity, ic_error = _compute_intercity(request.origin, request.city, request.transport_mode) if request.origin else (None, None)
-
-        # ── 天气查询（API 层，不占 LangGraph Node） ──
-        weather_data, weather_status, weather_error = _fetch_weather(request.city)
+        # ── API 预处理并行：intercity + weather 无依赖，同时提交 ──
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_intercity = (pool.submit(_compute_intercity, request.origin, request.city, request.transport_mode)
+                           if request.origin else None)
+            f_weather = pool.submit(_fetch_weather, request.city)
+            intercity, ic_error = f_intercity.result() if f_intercity else (None, None)
+            weather_data, weather_status, weather_error = f_weather.result()
 
         # 写入记忆
         memory.add(f"目的地: {request.city}", "observe")
@@ -108,8 +111,13 @@ async def plan_trip_stream(
             prefs = [p.strip() for p in preferences.split(",") if p.strip()]
             start = start_date or date.today().isoformat()
             date_list = [(date.fromisoformat(start) + timedelta(days=i)).isoformat() for i in range(days)]
-            intercity, ic_error = _compute_intercity(origin, city, transport_mode) if origin else (None, None)
-            weather_data, weather_status, weather_error = _fetch_weather(city)
+            # API 预处理并行：intercity + weather 无依赖，同时提交
+            with ThreadPoolExecutor(max_workers=2) as pool_pre:
+                f_intercity = (pool_pre.submit(_compute_intercity, origin, city, transport_mode)
+                               if origin else None)
+                f_weather = pool_pre.submit(_fetch_weather, city)
+                intercity, ic_error = f_intercity.result() if f_intercity else (None, None)
+                weather_data, weather_status, weather_error = f_weather.result()
 
             memory = get_memory()
             memory.add(f"目的地: {city}", "observe")
@@ -309,9 +317,16 @@ def _compute_intercity(origin: str, city: str, mode: str) -> tuple[IntercityTran
     try:
         mcp = get_amap_mcp_tool()
 
-        # 地理编码
-        geo_o = str(mcp.run({"action": "call_tool", "tool_name": "maps_geo", "arguments": {"address": origin}}))
-        geo_d = str(mcp.run({"action": "call_tool", "tool_name": "maps_geo", "arguments": {"address": city}}))
+        # 地理编码：origin/city 两次 geo 无依赖，并行提交
+        def _geo(addr: str) -> str:
+            return str(mcp.run({"action": "call_tool", "tool_name": "maps_geo",
+                                "arguments": {"address": addr}}))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_o = pool.submit(_geo, origin)
+            f_d = pool.submit(_geo, city)
+            geo_o = f_o.result()
+            geo_d = f_d.result()
 
         def get_coord(s):
             m = re.search(r'\"location\"\s*:\s*\"([\d.]+),([\d.]+)\"', s)

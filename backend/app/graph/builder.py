@@ -25,7 +25,7 @@ Phase 3 核心概念 #4: Checkpoint（SQLite 持久化）
 """
 import os
 import sqlite3
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from .state import TripPlannerState
 from .nodes import attraction_node, hotel_node, memory_node, planner_node
@@ -42,26 +42,28 @@ def build_trip_graph() -> StateGraph:
     """
     构建 TripPlanner LangGraph。
 
-    图结构（4 Node）:
-    ┌──────────┐
-    │  START   │
-    └────┬─────┘
-         │
-    ┌────▼─────┐
-    │ attraction│
-    └────┬─────┘
-         │
-    ┌────▼─────┐
-    │   hotel   │
-    └────┬─────┘
-         │
-    ┌────▼─────┐
-    │  memory   │
-    └────┬─────┘
-         │
-    ┌────▼─────┐
-    │  planner  │──conditional──→ retry_planner / retry_hotel / done
-    └──────────┘
+    图结构（4 Node, memory ∥ attraction fan-out）:
+              ┌──────────┐
+              │  START   │
+              └────┬─────┘
+        ┌─────────┴──────────┐   ← fan-out
+    ┌───▼──────┐          ┌──▼───────┐
+    │ attraction│          │  memory  │  (纯本地读, 与 attraction 并行)
+    └────┬─────┘          └─────┬────┘
+         │                      │
+    ┌────▼─────┐                │
+    │   hotel   │               │
+    └────┬─────┘                │
+         └─────────┬────────────┘   ← join (planner 等两者)
+              ┌────▼─────┐
+              │  planner  │──conditional──→ retry_planner / retry_hotel / done
+              └──────────┘
+
+    memory_node 无外部依赖（只读 memory.json），且不读 state 任何字段，
+    与 attraction_node 并行安全。写入字段无冲突：
+      - attraction_node 写 attraction_data/status/center_*/coords
+      - memory_node    写 user_profile
+    共同 error_log 由 Annotated[list, add] reducer 自动合并。
     """
 
     # 1. 创建 StateGraph——核心对象，管理所有 Node 和 Edge
@@ -73,13 +75,16 @@ def build_trip_graph() -> StateGraph:
     graph.add_node("memory", memory_node)
     graph.add_node("planner", planner_node)
 
-    # 3. 设定入口
-    graph.set_entry_point("attraction")
+    # 3. 入口 fan-out: START 同时指向 attraction 和 memory → 并行执行
+    graph.add_edge(START, "attraction")
+    graph.add_edge(START, "memory")
 
-    # 4. Edge: attraction → hotel → memory → planner
+    # 4. Edge:
+    #   attraction → hotel → planner  (主链路)
+    #   memory     → planner          (旁路 join: planner 有两个入边，等两者都到达)
     graph.add_edge("attraction", "hotel")
-    graph.add_edge("hotel", "memory")       # 酒店 → 记忆加载
-    graph.add_edge("memory", "planner")     # 记忆 → 规划（画像已注入 State）
+    graph.add_edge("hotel", "planner")
+    graph.add_edge("memory", "planner")
 
     # 5. Conditional edge: planner → retry_planner / retry_hotel / done
     graph.add_conditional_edges(
