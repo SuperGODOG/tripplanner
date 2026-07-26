@@ -14,15 +14,19 @@ conditional edge:
   - "retry_hotel"    → 回酒店用新中心重搜
   - "done" → END
 
-Phase 3 核心概念 #4: Checkpoint
+Phase 3 核心概念 #4: Checkpoint（SQLite 持久化）
 
-  graph.compile() 默认启用 Checkpoint。
+  使用 SqliteSaver 将 checkpoint 持久化到 data/checkpoints.db。
   每次 graph.invoke(state) 时传入 thread_id，
-  LangGraph 在每步 Node 执行后自动保存 State 快照。
+  LangGraph 在每步 Node 执行后自动保存 State 快照到 SQLite。
 
   中断后重试: 相同 thread_id → 从上次断点继续，不重新跑已完成的 Node。
+  相比默认的内存 Checkpoint: SQLite 持久化可在进程重启后恢复。
 """
-from langgraph.graph import StateGraph, END
+import os
+import sqlite3
+from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.sqlite import SqliteSaver
 from .state import TripPlannerState
 from .nodes import attraction_node, hotel_node, memory_node, planner_node
 
@@ -38,26 +42,28 @@ def build_trip_graph() -> StateGraph:
     """
     构建 TripPlanner LangGraph。
 
-    图结构（4 Node）:
-    ┌──────────┐
-    │  START   │
-    └────┬─────┘
-         │
-    ┌────▼─────┐
-    │ attraction│
-    └────┬─────┘
-         │
-    ┌────▼─────┐
-    │   hotel   │
-    └────┬─────┘
-         │
-    ┌────▼─────┐
-    │  memory   │
-    └────┬─────┘
-         │
-    ┌────▼─────┐
-    │  planner  │──conditional──→ retry_planner / retry_hotel / done
-    └──────────┘
+    图结构（4 Node, memory ∥ attraction fan-out）:
+              ┌──────────┐
+              │  START   │
+              └────┬─────┘
+        ┌─────────┴──────────┐   ← fan-out
+    ┌───▼──────┐          ┌──▼───────┐
+    │ attraction│          │  memory  │  (纯本地读, 与 attraction 并行)
+    └────┬─────┘          └─────┬────┘
+         │                      │
+    ┌────▼─────┐                │
+    │   hotel   │               │
+    └────┬─────┘                │
+         └─────────┬────────────┘   ← join (planner 等两者)
+              ┌────▼─────┐
+              │  planner  │──conditional──→ retry_planner / retry_hotel / done
+              └──────────┘
+
+    memory_node 无外部依赖（只读 memory.json），且不读 state 任何字段，
+    与 attraction_node 并行安全。写入字段无冲突：
+      - attraction_node 写 attraction_data/status/center_*/coords
+      - memory_node    写 user_profile
+    共同 error_log 由 Annotated[list, add] reducer 自动合并。
     """
 
     # 1. 创建 StateGraph——核心对象，管理所有 Node 和 Edge
@@ -69,13 +75,16 @@ def build_trip_graph() -> StateGraph:
     graph.add_node("memory", memory_node)
     graph.add_node("planner", planner_node)
 
-    # 3. 设定入口
-    graph.set_entry_point("attraction")
+    # 3. 入口 fan-out: START 同时指向 attraction 和 memory → 并行执行
+    graph.add_edge(START, "attraction")
+    graph.add_edge(START, "memory")
 
-    # 4. Edge: attraction → hotel → memory → planner
+    # 4. Edge:
+    #   attraction → hotel → planner  (主链路)
+    #   memory     → planner          (旁路 join: planner 有两个入边，等两者都到达)
     graph.add_edge("attraction", "hotel")
-    graph.add_edge("hotel", "memory")       # 酒店 → 记忆加载
-    graph.add_edge("memory", "planner")     # 记忆 → 规划（画像已注入 State）
+    graph.add_edge("hotel", "planner")
+    graph.add_edge("memory", "planner")
 
     # 5. Conditional edge: planner → retry_planner / retry_hotel / done
     graph.add_conditional_edges(
@@ -88,8 +97,19 @@ def build_trip_graph() -> StateGraph:
         }
     )
 
-    # 6. 编译——生成可执行的图，默认启用 Checkpoint
-    return graph.compile()
+    # 6. 编译——生成可执行的图，使用 SQLite 持久化 Checkpoint
+    # builder.py 在 backend/app/graph/ 下，上溯 4 层到项目根，然后 data/
+    _project_root = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", ".."))
+    data_dir = os.path.join(_project_root, "data")
+    os.makedirs(data_dir, exist_ok=True)
+
+    # SQLite 连接：check_same_thread=False 因为 LangGraph 在不同线程读写 checkpoint
+    db_path = os.path.join(data_dir, "checkpoints.db")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
+
+    return graph.compile(checkpointer=checkpointer)
 # 全局单例
 _trip_graph = None
 

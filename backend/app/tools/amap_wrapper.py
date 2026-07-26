@@ -13,7 +13,7 @@ Wrapper 内部路径:
   params["type"]=="around"    → 新路径: maps_around（周边搜索，自带坐标）
 """
 import json, re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout, as_completed
 from typing import Any
 from hello_agents.tools import Tool, ToolParameter
 from ..services.amap_service import get_amap_mcp_tool
@@ -71,19 +71,28 @@ class AmapToolWrapper(Tool):
 
     def _call_mcp(self, city: str, stype: str, kw: str, center: str, radius: str = "") -> Any:
         if stype == "weather":
-            return self._mcp.run({
+            return self._mcp_run_with_timeout({
                 "action": "call_tool", "tool_name": "maps_weather",
                 "arguments": {"city": city},
             })
         if stype == "around" and center:
-            return self._mcp.run({
+            return self._mcp_run_with_timeout({
                 "action": "call_tool", "tool_name": "maps_around",
                 "arguments": {"location": center, "keywords": kw or "酒店", "radius": radius or "5000"},
             })
-        return self._mcp.run({
+        return self._mcp_run_with_timeout({
             "action": "call_tool", "tool_name": "maps_text_search",
             "arguments": {"keywords": kw or stype, "city": city, "citylimit": "true"},
         })
+
+    def _mcp_run_with_timeout(self, args: dict, timeout: int = 10) -> Any:
+        """MCP 调用包装超时，避免长时间阻塞"""
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(self._mcp.run, args)
+            try:
+                return future.result(timeout=timeout)
+            except FutTimeout:
+                return {"error": "MCP timeout"}
 
     # ================================================================
     # 第 1.5 层: 坐标增强

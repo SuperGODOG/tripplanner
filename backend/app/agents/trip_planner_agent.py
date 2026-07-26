@@ -5,7 +5,7 @@ Phase 3: 迁移到 LangGraph StateGraph
 """
 import json
 from hello_agents import SimpleAgent
-from ..services.llm_service import get_llm
+from ..services.llm_service import get_llm, retry_with_backoff
 from ..tools.amap_wrapper import AmapToolWrapper
 
 
@@ -235,6 +235,17 @@ class MultiAgentTripPlanner:
         print(f"   酒店 Agent: {len(self.hotel_agent.list_tools())} 个工具")
         print(f"   规划 Agent: {len(self.planner_agent.list_tools())} 个工具（无工具，纯推理）")
 
+    def _run_agent_with_retry(self, agent, prompt: str, max_retries=3) -> str:
+        """带指数退避重试的 agent.run() 包装。
+
+        处理 LLM API 临时故障（超时、500、限流等），
+        使用 retry_with_backoff 自动重试。
+        """
+        return retry_with_backoff(
+            lambda: agent.run(prompt),
+            max_retries=max_retries,
+        )
+
     # ============================================================
     # Phase 2: 顺序编排（Phase 3 将替换为 LangGraph）
     # ============================================================
@@ -262,7 +273,7 @@ class MultiAgentTripPlanner:
             f"请搜索{city}的景点。\n"
             f"[TOOL_CALL:amap_search:city={city},type=attraction]"
         )
-        attraction_result = self.attraction_agent.run(attraction_query)
+        attraction_result = self._run_agent_with_retry(self.attraction_agent, attraction_query)
 
         # ── Step 2: 天气查询 ──
         print("🌤  Step 2/4: 天气查询 Agent 工作中...")
@@ -270,7 +281,7 @@ class MultiAgentTripPlanner:
             f"请查询{city}的天气信息。\n"
             f"[TOOL_CALL:amap_search:city={city},type=weather]"
         )
-        weather_result = self.weather_agent.run(weather_query)
+        weather_result = self._run_agent_with_retry(self.weather_agent, weather_query)
 
         # ── Step 3: 酒店搜索 ──
         print("🏨 Step 3/4: 酒店推荐 Agent 工作中...")
@@ -278,7 +289,7 @@ class MultiAgentTripPlanner:
             f"请搜索{city}的酒店。\n"
             f"[TOOL_CALL:amap_search:city={city},type=hotel]"
         )
-        hotel_result = self.hotel_agent.run(hotel_query)
+        hotel_result = self._run_agent_with_retry(self.hotel_agent, hotel_query)
 
         # ── Step 4: 行程规划 ──
         print("📋 Step 4/4: 行程规划 Agent 工作中...")
@@ -295,7 +306,7 @@ class MultiAgentTripPlanner:
 
 **用户偏好:** {', '.join(preferences) if preferences else '无'}
 """
-        planner_result = self.planner_agent.run(planner_query)
+        planner_result = self._run_agent_with_retry(self.planner_agent, planner_query)
 
         # 解析 JSON
         plan = self._parse_plan(planner_result)

@@ -203,11 +203,30 @@ LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓
 - [ ] **多用户支持**：记忆模块加入用户隔离（当前为单用户模式）
 - [ ] **向量化记忆检索**：当前为关键词匹配，升级为 embedding + 向量相似度（适合"用户之前去杭州时喜欢什么类型"这类语义查询）
 - [x] **流式响应 (SSE)**：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度
+- [x] **API 层与图内并发**：intercity ∥ weather、maps_geo 双查、memory ∥ attraction fan-out 拓扑
 - [ ] **多 LLM 提供商**：支持 OpenAI / Claude / 本地模型切换
 - [ ] **A2A 协议集成**：Agent-to-Agent 通信，支持跨系统 Agent 协作
 - [x] **前端重构**：从单文件 HTML 迁移到 React/Vue 组件化
 - [ ] **Docker 部署**：提供 Dockerfile + docker-compose，一键启动全部服务
 - [ ] **自动化测试**：pytest 覆盖各 Node 的单元测试 + 集成测试
+
+### 容错与恢复（已落地）
+
+- **LangGraph Checkpoint**: SQLite 持久化（`data/checkpoints.db`），进程重启后断点续传
+- **LLM 退避重试**: 指数退避 max 3 次（1s → 2s → 4s）
+- **MCP 调用超时**: 10s timeout 保护（`amap_wrapper.py`）
+- **记忆去重**: 连续相同记录跳过写入
+- **SSE 取消传播**: 客户端断开后后台线程感知取消信号
+- 总计 ~200 行新增，零删除
+
+### 并发优化（已落地）
+
+三处独立任务从串行改并行，无需应用层锁——`MCPTool.run()` 每次调用内部新建独立 event loop + MCPClient 连接，无共享 mutable state；`error_log` 由 `Annotated[list, add]` reducer 合并。
+
+- **API 预处理并行** (`app/api/trip.py`)：`_compute_intercity` ∥ `_fetch_weather` 用 `ThreadPoolExecutor` 同时提交；`/api/trip` 与 `/api/trip/stream` 两个端点一致改造。预处理耗时从 `t1 + t2` 变为 `max(t1, t2)`
+- **maps_geo 双查并行** (`app/api/trip.py`)：`_compute_intercity` 内 origin/destination 地理编码同时提交，节省一次 MCP round-trip（~200-500ms）
+- **LangGraph 拓扑 fan-out** (`app/graph/builder.py`)：`START → [attraction, memory]` 并行入口 + planner 双入边 join。memory 是纯本地 JSON 读，与 attraction 的 LLM+MCP 长任务并行不阻塞；planner 自动等 hotel + memory 都到达
+- 端到端验证（上海→杭州 2 天）：`graph.invoke` 76.6s，final_plan 完整，`user_profile 加载: True` 直接证明 memory 边执行到位
 
 ---
 
