@@ -1,6 +1,64 @@
-# TripPlanner 面试问答
+# TripPlanner 面试问答库
+
+> 本文合并自 4 份文档：
+> - `面试问答.md`（主体，35+ 问答按业务/技术/项目深度/架构设计分类）
+> - `plan/Phase7-面试文档.md`（6 个钩子 + 常见陷阱 + 电梯演讲）
+> - `项目方案书-修正版.md`（三层递进应答模板）
+> - **补充**：2026-07-26 并发化改造相关问答
+>
+> 最后更新：2026-07-26
 
 ---
+
+## 使用方式
+
+**主动出击**：用文末**附录 A**的三层递进节奏和电梯演讲**主动介绍**，把面试官引到你准备最充分的方向。
+
+**被动应答**：按主体 5 大类（业务面 / 技术面 / 项目深度 / 架构设计 / 陷阱题）查具体问题。
+
+**核心钩子速览**（Phase7 版，详见附录 A）：
+
+| # | 钩子（你主动说） | 引出的追问 |
+|---|------|------|
+| 1 | LangGraph StateGraph 编排 + Checkpoint + Conditional Edge | Conditional Routing、断点恢复、两层容错 |
+| 2 | Wrapper 内三层：MCP → Format → Validate | 为什么不写成独立 Tool？为什么 Format 不上 MCP？ |
+| 3 | 五因子权重 + IQR 异常检测 | 具体公式、Alex 案例、为什么乘法不加法 |
+| 4 | 5 层架构（LLM→ReAct→框架→图→多 Agent） | 图级 vs Agent 级容错分离 |
+| 5 | API 层与业务层解耦 | 换编排引擎只改一行 |
+| 6 | Pydantic 校验 / MCPTool 单例 / venv + pydantic-settings | 校验怎么工作、单例意义 |
+
+---
+
+## ⚡ 并发相关问答（2026-07-26 新加，原 4 份文档未覆盖）
+
+### Q: 项目里怎么做并发的？为什么不用加锁？
+
+**一句话**：识别**三处独立子任务**改并行——API 层 `intercity ∥ weather`、城际交通内 `maps_geo` 双查、LangGraph 图内 `memory ∥ attraction` fan-out——全部用 `ThreadPoolExecutor` + `Annotated[list, add]` reducer 自动合并 `error_log`，**无需应用层 Lock**。
+
+**为什么不用 Lock**：
+
+读了 `hello_agents.MCPTool.run()` 源码（`protocol_tools.py:339-466`）确认——每次 `.run()` 调用内部**新建独立 event loop + 新建独立 MCPClient 连接**，MCPTool 实例上无共享 mutable state（`self._client` 一直是 None，`self._available_tools/env/server_command` init 后只读）。共享 mutable state 才需要 Lock，这里没有——所以 GIL + I/O 释放的默认行为已经安全。
+
+**先例证据**：`amap_wrapper.py:126` 早就用 `ThreadPoolExecutor(max_workers=5)` 并发 `maps_geo`（无锁），跑了很久没问题——这是团队已经接受的写法。
+
+**收益量化**：
+
+| 位置 | 改动 | 收益 |
+|------|------|------|
+| `api/trip.py:32-37` | `_compute_intercity ∥ _fetch_weather` | 预处理耗时从 `t1+t2` 降到 `max(t1,t2)`，长途路线省 1-3s |
+| `api/trip.py:325-333` | 起点/终点两次 `maps_geo` 并发 | 省一次 MCP round-trip（~200-500ms）|
+| `graph/builder.py:79-87` | `START → [attraction, memory]` fan-out + planner 双入边 join | memory 是纯本地 JSON 读，不阻塞 attraction 的 LLM+MCP 长任务 |
+
+**追问：GIL 不是阻碍多线程吗？**
+GIL 让"纯 CPU 计算"不能真正并行，但 **I/O 等待时会释放 GIL**：MCP 是子进程 stdio、LLM 是网络请求、`memory.json` 是磁盘 IO——**全都是 I/O**。所以 `ThreadPoolExecutor` 在这种场景下有效。想真正 CPU 并行才需要 `multiprocessing`。
+
+**追问：LangGraph 里 fan-out 怎么 join？**
+`planner_node` 有两条入边（`hotel` + `memory`），LangGraph 的 super-step 语义会自动等两条边都完成才执行 planner。**不需要写 Lock 或 Semaphore**——图引擎的 pregel 语义帮你调度。retry_hotel 触发时，从 planner 跳回 hotel 走一个 super-step，memory 不会重复执行（super-step 内没有 pending 消息）。
+
+**改动规模**：30 行新增，零架构侵入。
+
+---
+
 
 ## 项目介绍（30 秒，埋钩子引导追问）
 
@@ -2964,3 +3022,103 @@ Redo log 写入遵循 WAL（Write-Ahead Logging）原则：事务修改数据时
 - ❌ "薪资能再谈吗？"——反问环节不谈钱，这是 HR 谈 offer 时的事。
 - ❌ "我表现怎么样能过吗？"——把压力转给面试官，暴露不自信。换成"刚才聊到的 XX 问题，您觉得从团队的角度有什么更好的思路吗？"（既展示好学习心态又不卑微）。
 - ❌ 没问题硬问——"公司食堂好吃吗"之类的无效问题。实在没想问的，用安全牌："您个人在公司的这些年，觉得最有成就感的一个项目是什么？"——总能引发对方分享，同时了解团队真实产出。
+
+---
+
+# 附录 A：主动介绍脚本（三层递进）
+
+## 第一层：开场（30 秒电梯演讲）
+
+> "我做了一个多智能体旅行规划系统。4 个 Agent 通过 LangGraph 图编排，MCP 协议调高德地图 API。亮点是**双层容错**——图级 Conditional Routing 和 Agent 级 Error-as-Observation 独立工作——以及**基于 IQR 异常检测的记忆系统**，保证用户长期画像不被偶然行为破坏。"
+
+> 附加钩子：**"三处并发化改造，无需应用层 Lock"**（如果对方是后端/系统方向）
+> 附加钩子：**"越用越懂你"**（如果对方是产品/业务方向）
+
+## 第二层：细节展开（对方感兴趣时挑 2-3 项讲）
+
+- **LangGraph 编排**：4 个 Agent = 4 个 Node，Edge 定义流转；Conditional Edge 三路路由（`retry_planner ≤3` / `retry_hotel ≤2` / `done`）；SqliteSaver Checkpoint 断点续传；`START → [attraction, memory]` fan-out
+- **MCP 工具协议**：一行 `uvx amap-mcp-server` 启动，16 工具自动发现，共享 MCPTool 实例避免重复建连
+- **AmapToolWrapper 3 层**：MCP → Format → Validate，Agent 只见 1 个 tool，单次省 60% token（800 字压至 300 字），内部 5-worker 线程池并发 `maps_geo`
+- **五因子权重记忆**：`domain × decay × interaction × frequency_boost × outlier_penalty`，画像 `trip_count ≥ 5` 才生效
+- **双轨异常检测**：数值型走 IQR（Q3+1.5IQR）+ 分类型走频率比（<众数 30% → penalty=0.3）
+- **离群景点检测**：标准差 `mean+1.5σ` + 80km 硬上限双轮过滤，触发 `retry_hotel`
+- **6 项 Interrupt 容错**：SqliteSaver / 指数退避 / MCP 10s 超时 / SSE 取消 / 记忆去重 / thread_id
+- **三处并发化**：API 层 `intercity ∥ weather`、`maps_geo` 双查、图内 `memory ∥ attraction`
+
+## 第三层：工程取舍（对方追问深度时的判断力展示）
+
+| 决策 | 为什么这样做 | 为什么不那样 |
+|------|-------------|-------------|
+| LangGraph 不用 while 手写 | 声明式加 Node 不改代码 + Checkpoint 断点续传 + Conditional Edge | 手写这三样都要自己造轮子 |
+| Wrapper 不写成独立 Tool | 省 3 轮 ReAct + 挡掉工程细节 + 省 token | 独立 Tool 让 Agent 被迫理解流水线 |
+| 记忆自研不用 vector DB | 离散标签匹配（不吃辣/经济型）不是语义检索 | vector 库适合"用户之前去杭州喜欢什么"这种语义查询，是后续方向 |
+| 天气在 API 层不在图内 Node | 确定性 API 不该占 LLM 推理轮次 | 放 Node 里要经 ReAct 循环，浪费 token |
+| 三处并发不加 Lock | MCPTool 每次调用独立 event loop + 独立连接、无共享 mutable state；error_log 用 reducer | 加 Lock 是过度设计，且 amap_wrapper 早有先例 |
+| retry 有上限（3/2 次） | 防止死循环 | 无限重试遇到永久性错误会卡死 |
+
+---
+
+# 附录 B：常见陷阱题
+
+## 陷阱 1: "你这个不就是调 API 吗，AI 含量在哪？"
+
+**别答**"我用了 LangGraph..."——这没回答问题。
+
+**正确答**：AI 含量在两层：
+1. **Agent 内 ReAct 循环**是 AI 自主决策——LLM 每轮决定要不要调工具、调哪个、结果够不够，不是写死的 if/else
+2. **Planner Agent 推理**是 AI 核心——理解景点间时空关系（距离、天气影响）后生成有逻辑的日程，这是语义理解 + 推理，不是模板填充
+
+## 陷阱 2: "LangGraph 和 LangChain 什么关系？"
+
+> "LangGraph 是 LangChain 生态里的图编排框架但**不依赖 LangChain**——可独立使用。我们的 Agent 框架用的是 HelloAgents 而非 LangChain Agent。HelloAgents 管 Agent 封装 + 工具调用（第 3 层），LangGraph 管多 Agent 编排 + 状态管理（第 4 层）。各取所长。"
+
+## 陷阱 3: "记忆模块为什么不用向量数据库？"
+
+> "当前需求是用户偏好画像——'不吃辣'、'预算 300-500'、'喜欢地铁'——这些是**离散标签匹配**不是语义检索。关键词匹配 + 统计加权足够。向量库更适合'相似记忆检索'（比如'用户之前去杭州喜欢什么类型景点'），那是后续迭代方向。"
+
+## 陷阱 4: "为什么不用 AutoGen / CrewAI？"
+
+> "AutoGen 侧重 Agent 之间自然语言对话（辩论式协作），CrewAI 侧重角色化任务分工。我们的场景是**明确的数据流水线**——景点→酒店→记忆→规划有固定依赖，不需要 Agent 之间辩论。LangGraph 的显式 Edge + Conditional Edge 更适合这种场景。选型原则：**框架契合场景**而不是**追新**。"
+
+## 陷阱 5: "如果我要抢票秒杀这种高并发场景你能做吗？"
+
+> "TripPlanner 本身不是高并发场景（LLM 调用是主要瓶颈，30-60s 每次）。但我实习里做过挂号系统的高并发部分——Redis 分布式锁 + RabbitMQ 削峰 + MySQL 乐观锁，本地压测响应 200ms 内。抢票秒杀的技术栈是清楚的：缓存三兄弟（穿透/击穿/雪崩）+ 限流（令牌桶）+ 熔断。这块下一步会独立做一个练手项目扎实练一遍。"
+
+---
+
+# 附录 C：面试官按类型的速答表
+
+## "为什么选这些技术？"
+
+| 技术 | 回答核心 |
+|------|---------|
+| LangGraph | 声明式图编排 + Checkpoint + Conditional Routing，手写 while 缺这三样 |
+| MCP | 标准化工具协议，`uvx` 一键启动，16 工具自动发现 |
+| FastAPI | Pydantic 自动校验 + Swagger 自动生成，零样板 |
+| DeepSeek | 已有 Key，性价比高 |
+| Vue 3 | Composition API + Vite 冷启动快，单文件轻依赖 |
+
+## "你遇到什么难点？"
+
+1. **MCP 和 LLM 上下文冲突** → 引出 AmapToolWrapper
+2. **用户画像被偶然行为污染** → 引出 Alex 案例 + IQR
+3. **MCPTool 返回 JSON 带前缀无法直接解析** → 引出 `_extract_json` 正则修复
+4. **memory ∥ attraction 并发是否需要 Lock** → 引出读源码验证 + fan-out 拓扑
+
+## "如果再给你一周做什么？"（README 后续计划 P0）
+
+1. **Docker + docker-compose 一键部署**（练镜像编排 + 网络 + volume）
+2. **Redis 缓存层**（练缓存三兄弟：穿透/击穿/雪崩）
+3. **多用户 + JWT 鉴权 + 记忆隔离**（练 RBAC）
+4. **Prometheus + Grafana 可观测性**（练 SRE）
+
+---
+
+# 附录 D：一句话电梯演讲
+
+> "多智能体旅行规划系统：4 Node LangGraph + MCP 高德 + 五因子权重记忆，图级/Agent 级双层容错，三处并发无锁，2150 行 Python/Vue。"
+
+---
+
+_定位：`docs/interview/qa.md`_
+_最后更新：2026-07-26 — 主体来自面试问答.md（2966 行）+ 头部并发问答 + 尾部附录（钩子索引/主动介绍/陷阱/速答/电梯演讲）_
