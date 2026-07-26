@@ -199,16 +199,42 @@ LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓
 
 ## 🔮 后续更新计划
 
-- [x] **Conditional Edge 实现**：retry_planner（硬伤重生成 3 次）+ retry_hotel（离群重算 2 次）已上线
-- [ ] **多用户支持**：记忆模块加入用户隔离（当前为单用户模式）
-- [ ] **向量化记忆检索**：当前为关键词匹配，升级为 embedding + 向量相似度（适合"用户之前去杭州时喜欢什么类型"这类语义查询）
-- [x] **流式响应 (SSE)**：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度
-- [x] **API 层与图内并发**：intercity ∥ weather、maps_geo 双查、memory ∥ attraction fan-out 拓扑
-- [ ] **多 LLM 提供商**：支持 OpenAI / Claude / 本地模型切换
-- [ ] **A2A 协议集成**：Agent-to-Agent 通信，支持跨系统 Agent 协作
-- [x] **前端重构**：从单文件 HTML 迁移到 React/Vue 组件化
-- [ ] **Docker 部署**：提供 Dockerfile + docker-compose，一键启动全部服务
-- [ ] **自动化测试**：pytest 覆盖各 Node 的单元测试 + 集成测试
+### ✅ 已落地
+
+- [x] **Conditional Edge**：`retry_planner`（硬伤重生成 ≤3）+ `retry_hotel`（离群重算 ≤2）
+- [x] **流式响应 (SSE)**：API → Server-Sent Events，前端实时展示每个 Node 进度
+- [x] **前端组件化**：单文件 HTML → Vue 3 SPA
+- [x] **API 层与图内并发**：`intercity ∥ weather`、`maps_geo` 双查、`memory ∥ attraction` fan-out 拓扑
+- [x] **前端 UX 升级**：Glassmorphism + 3D tilt hover + 鼠标追踪 spotlight + 卡片入场 stagger + 数字 count-up + budget bar 生长动画（无外部动画库依赖）
+
+### 🥇 P0 · 补后端硬实力（强推）
+
+- [ ] **Docker + docker-compose 一键部署**：redis + postgres + backend + frontend + nginx —— 练镜像编排 / 网络 / volume 持久化
+- [ ] **Redis 缓存层**：高德 POI 查询缓存 —— 练**缓存三兄弟**（穿透 / 击穿 / 雪崩）
+- [ ] **多用户 + JWT 鉴权 + 记忆隔离**：当前单租户，加 RBAC + 分租户存储
+- [ ] **Prometheus + Grafana 可观测性 + 全链路 traceId**：QPS / P99 / MCP 调用成功率仪表盘
+
+### 🥈 P1 · AI 加深
+
+- [ ] **Critic Agent 替代硬编码 `_validate_and_refine`**：Planner + Critic 循环，多智能体叙事升级
+- [ ] **Planner 用 LangGraph `Send` API 每日 fan-out**：N 天并行生成 subplan → fan-in 合并
+- [ ] **向量化记忆检索**：Embedding + 相似度替代关键词匹配，支持"用户之前去杭州时喜欢什么"语义查询
+- [ ] **A2A 协议集成**：Agent-to-Agent 通信，TripPlanner 作为 Agent 被其他系统调用
+- [ ] **多 LLM 提供商**：OpenAI / Claude / 本地 Ollama 切换
+
+### 🥉 P2 · 产品完成度
+
+- [ ] **导出行程**：PDF / 日历 ICS / 图片
+- [ ] **地图组件**：Leaflet / Mapbox 显示行程路线 + 景点热力图
+- [ ] **移动端 PWA**
+- [ ] **推送通知**：出行前 24h / 天气突变提醒
+- [ ] **多语言 i18n**
+
+### 🧪 工程质量（穿插做）
+
+- [ ] **pytest 单元 + 集成测试**：各 Node 覆盖率 + E2E
+- [ ] **CI/CD**：GitHub Actions（lint + build + test）
+- [ ] **压测报告 + 性能基线**：K6 / Locust
 
 ### 容错与恢复（已落地）
 
@@ -235,24 +261,34 @@ LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓
 ```
 tripplanner/
 ├── README.md                    # 本文件
-├── PROJECT.md                   # 项目总文档（541 行）
+├── CLAUDE.md                    # 项目备忘录（Claude Code 自动读取）
 ├── ARCHITECTURE.md              # 7 张 Mermaid 架构图
-├── plan/                        # Phase 1-7 计划 + 面试文档
-└── backend/
-    ├── app/
-    │   ├── agents/              # 4 SimpleAgent
-    │   ├── graph/               # 4 Node StateGraph + Conditional Edge
-    │   ├── tools/               # AmapToolWrapper + FallbackTool
-    │   ├── memory/              # 五因子 + 双轨异常检测
-    │   ├── api/                 # FastAPI + 城际交通预处理
-    │   ├── models/              # Pydantic 模型
-    │   └── services/            # MCP + LLM 单例
-    ├── static/index.html        # MVP 前端
-    ├── run.py                   # 一键启动
-    ├── .env.example             # 配置模板
-    ├── .gitignore
-    └── requirements.txt
+├── 简历项目经历.md               # 简历
+├── docs/                        # 详细文档
+│   ├── OVERVIEW.md              # 项目总览（精简版）
+│   ├── interview/               # 面试导向讲解 + 问答库
+│   ├── technical-notes/         # 深入技术设计（分布式容错评估等）
+│   └── history/                 # Phase 1-7 历史规划 + 早期方案书
+├── backend/                     # FastAPI + LangGraph
+│   ├── app/{agents,graph,tools,memory,api,models,services}
+│   ├── data/                    # memory.json + checkpoints.db
+│   └── run.py
+└── frontend/                    # Vue 3 单页应用
 ```
+
+### 文档地图
+
+| 想看什么 | 去哪里 |
+|---------|--------|
+| 项目总览（精简） | [`docs/OVERVIEW.md`](docs/OVERVIEW.md) |
+| 架构图（Mermaid） | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
+| 面试自我介绍脚本 | [`docs/interview/introduction.md`](docs/interview/introduction.md) |
+| 面试问答库 | [`docs/interview/qa.md`](docs/interview/qa.md) |
+| 分布式容错评估 | [`docs/technical-notes/interrupt-resilient-design.md`](docs/technical-notes/interrupt-resilient-design.md) |
+| Phase 1-7 时间线原始文档 | [`docs/history/PROJECT.md`](docs/history/PROJECT.md) |
+| Phase 单独规划文档 | [`docs/history/plan/`](docs/history/plan/) |
+| 早期方案书 | [`docs/history/项目方案书-修正版.md`](docs/history/项目方案书-修正版.md) |
+| 项目备忘录（环境/分支流程/设计原则） | [`CLAUDE.md`](CLAUDE.md) |
 
 ---
 
