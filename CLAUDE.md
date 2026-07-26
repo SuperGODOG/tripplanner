@@ -12,13 +12,17 @@
 
 ## Architecture
 
-- **4 Node 图**: `attraction → hotel → memory → planner`（天气已移入 API 层预处理）
+- **4 Node 图 + fan-out/join 拓扑** (2026-07-26 更新): `START → [attraction, memory] → hotel → planner`
+  - `memory` 与 `attraction` 并行入口（memory 纯本地 JSON 读，不阻塞 LLM+MCP 长任务）
+  - `planner` 双入边 join：LangGraph 自动等 hotel + memory 都到达
+  - 天气 + 城际交通已移入 API 层预处理（`_fetch_weather ∥ _compute_intercity` 也并发提交）
 - **Thick Node 原则**: 每个 Node 独立完成「搜索 → 增强 → 计算」闭环，不是薄 API 转接头
   - 数据增强归 Node（Wrapper 接入 Agent 坐标增强）
   - 纯工程计算（城际交通、日期）放 API 层预处理
+- **无锁并发**: `MCPTool.run()` 每次调用内部新建独立 event loop + MCPClient 连接，无共享 mutable state；`error_log: Annotated[list, add]` reducer 自动合并 —— 三处并发（API 层双任务 / maps_geo 双查 / 图内 fan-out）均无需应用层 Lock
 - **离群检测**: 标准差法 1.5σ + 80km 硬上限
 - **酒店回环检测**: ≤2 次
-- **前端**: POST 替代 SSE
+- **前端**: POST 替代 SSE；Vue 3 单文件，无 UI/动画库依赖
 
 ## Branch Workflow
 

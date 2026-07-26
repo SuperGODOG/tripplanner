@@ -8,10 +8,10 @@ _在 VSCode 中装 `Markdown Preview Mermaid Support` 插件后即可预览_
 
 ```mermaid
 flowchart TB
-    subgraph APILayer["API 层: 请求预处理（FastAPI）"]
+    subgraph APILayer["API 层: 请求预处理（FastAPI）— intercity ∥ weather 并发提交"]
         direction LR
         PRE1["日期计算<br/>Python 本地预计算<br/>不交 LLM"]
-        PRE2["城际交通<br/>距离/时间/费用<br/>高德 API + fallback"]
+        PRE2["城际交通<br/>距离/时间/费用<br/>高德 API + fallback<br/>（内部 maps_geo 双查并发）"]
         PRE3["天气查询<br/>maps_weather 直接调用<br/>格式化后注入 State"]
     end
 
@@ -19,12 +19,12 @@ flowchart TB
         direction LR
         N1["attraction_node<br/>景点 Agent + MCP<br/>maps_geo 坐标增强"]
         N3["hotel_node<br/>酒店 Agent + MCP<br/>景点中心就近搜索"]
-        N4["memory_node<br/>加载用户画像<br/>（纯本地读取）"]
+        N4["memory_node<br/>加载用户画像<br/>（纯本地读取，与 attraction 并行）"]
         N5["planner_node<br/>整合 + 推理 + 离群检测<br/>（无工具，纯推理）"]
     end
 
     subgraph Layer4["第 4 层: 图编排 (LangGraph)"]
-        EDGE["Edge: attraction→hotel→memory→planner"]
+        EDGE["Edge: START → [attraction, memory] → hotel → planner<br/>（fan-out/join 拓扑，memory 与 attraction 并行）"]
         COND["Conditional: planner → retry_planner / retry_hotel / done"]
         ERRLOG["error_log: Annotated[list, add]<br/>所有 Node 降级写入，自动累积"]
         CHECKPOINT["Checkpoint: SqliteSaver 持久化<br/>data/checkpoints.db<br/>进程重启后断点续传"]
@@ -56,8 +56,10 @@ flowchart TB
     end
 
     USER["POST /api/trip<br/>城市 + 天数 + 偏好"] --> PRE1 & PRE2 & PRE3
-    PRE1 & PRE2 & PRE3 --> N1
-    N1 --> N3 --> N4 --> N5
+    PRE1 & PRE2 & PRE3 --> N1 & N4
+    N1 --> N3
+    N3 --> N5
+    N4 --> N5
     N5 --> USER
 
     N1 -.-> WRAPPER
@@ -70,24 +72,32 @@ flowchart TB
 
 ---
 
-## 图 2：LangGraph 状态机流转（4 Node + Conditional Edge）
+## 图 2：LangGraph 状态机流转（4 Node + fan-out/join + Conditional Edge）
 
 > 城际交通 + 日期计算 + **天气查询**在 **API 层预处理**，不在 LangGraph 图中。
 > 图从 `graph.invoke(state)` 开始，此时 State 已含所有预处理数据（天气/城际/日期）。
+> **拓扑说明**：`START` fan-out 到 `AttractionNode` 和 `MemoryNode` 并行；`PlannerNode` 有两条入边（`HotelNode` + `MemoryNode`），LangGraph 自动 join 等两者都到达。`MemoryNode` 是纯本地 JSON 读，与 `AttractionNode` 的 LLM+MCP 长任务并行不阻塞。
 > Agent 内部的 Error-as-Observation（第 2 层）见图 6。
 
 ```mermaid
 stateDiagram-v2
-    [*] --> AttractionNode: graph.invoke(state)
+    state fork_out <<fork>>
+    state join_in <<join>>
+
+    [*] --> fork_out: graph.invoke(state)
+    fork_out --> AttractionNode
+    fork_out --> MemoryNode: 与 attraction 并行
 
     AttractionNode --> HotelNode: 景点搜索完成 + 中心计算
     note right of AttractionNode: maps_geo 获取城市中心 → maps_around 20km 搜索<br/>本地 Python 计算景点群物理中心<br/>失败时 status="failed"<br/>写入 error_log（Annotated[list, add]）<br/>不抛异常，下游继续
 
-    HotelNode --> MemoryNode: 酒店搜索完成
+    HotelNode --> join_in: 酒店搜索完成
     note right of HotelNode: 优先使用景点中心 nearby 搜索<br/>失败时退化全城搜索<br/>写入 error_log
 
-    MemoryNode --> PlannerNode: 画像已注入 State
-    note right of MemoryNode: 纯本地读取 MemoryManager<br/>trip_count ≥ 5 时画像有效<br/>不调 LLM / API
+    MemoryNode --> join_in: 画像已注入 State
+    note right of MemoryNode: 纯本地读取 MemoryManager<br/>trip_count ≥ 5 时画像有效<br/>不调 LLM / API<br/>与 attraction 并行执行
+
+    join_in --> PlannerNode
 
     PlannerNode --> PlannerNode: retry_planner（硬伤重生成, 最多 3 次）
     PlannerNode --> HotelNode: retry_hotel（离群重算, 最多 2 次）
@@ -112,29 +122,42 @@ sequenceDiagram
 
     User->>API: POST /api/trip
 
-    Note over API: 🔧 API 层预处理<br/>① Python 本地 date_list 计算<br/>② maps_weather 天气查询 + 格式化<br/>③ 城际交通（高德 API + fallback）<br/>④ 写入记忆 + trip_count++
+    Note over API: 🔧 API 层预处理（ThreadPoolExecutor 并发）<br/>① Python 本地 date_list 计算<br/>② par: maps_weather 天气查询 + 格式化<br/>   par: 城际交通（内部 maps_geo × 2 双查并发 + maps_distance + fallback）<br/>③ 写入记忆 + trip_count++
+
+    par intercity ∥ weather (并发提交)
+        API->>MCP: maps_geo(origin) + maps_geo(city) 双查
+        MCP-->>API: JSON 坐标
+        API->>MCP: maps_distance
+        MCP-->>API: JSON 距离
+    and
+        API->>MCP: maps_weather(city)
+        MCP-->>API: JSON 天气
+    end
 
     API->>Graph: graph.invoke(state)<br/>(含 date_list + weather_data + intercity_*)
 
-    Note over Graph: 串行流水线 + Conditional Edge
+    Note over Graph: fan-out/join 拓扑 + Conditional Edge<br/>(START → [attraction, memory] 并行入口)
 
-    Graph->>Attr: attraction_node(state)
-    Attr->>MCP: maps_geo(城市) → 获取中心坐标
-    MCP-->>Attr: JSON 坐标
-    Attr->>MCP: maps_around(景点, center, radius=20km)
-    MCP-->>Attr: JSON 景点数据
-    Note over Attr: 本地 Python 计算<br/>景点群物理中心（质心）
-    Attr-->>Graph: state.attraction_data<br/>+ center_lng/center_lat<br/>+ attraction_coords<br/>+ error_log（失败时）
+    par attraction ∥ memory (fan-out)
+        Graph->>Attr: attraction_node(state)
+        Attr->>MCP: maps_geo(城市) → 获取中心坐标
+        MCP-->>Attr: JSON 坐标
+        Attr->>MCP: maps_around(景点, center, radius=20km)
+        MCP-->>Attr: JSON 景点数据
+        Note over Attr: 本地 Python 计算<br/>景点群物理中心（质心）
+        Attr-->>Graph: state.attraction_data<br/>+ center_lng/center_lat<br/>+ attraction_coords
+    and
+        Graph->>Mem: memory_node(state)
+        Note over Mem: 从 data/memory.json 加载用户画像<br/>trip_count ≥ 5 时有效<br/>（纯本地，不调 API，与 attraction 并行）
+        Mem-->>Graph: state.user_profile
+    end
 
-    Graph->>Hotel: hotel_node(state)
+    Graph->>Hotel: hotel_node(state)  【attraction 完成后触发】
     Hotel->>MCP: maps_around(酒店, center=景点中心)
     MCP-->>Hotel: JSON 酒店数据
     Hotel-->>Graph: state.hotel_data<br/>+ hotel_status<br/>+ error_log（失败时）
 
-    Graph->>Mem: memory_node(state)
-    Note over Mem: 从 data/memory.json<br/>加载用户画像<br/>trip_count ≥ 5 时有效<br/>（纯本地，不调API）
-    Mem-->>Graph: state.user_profile
-
+    Note over Graph: planner 双入边 join：等 hotel + memory 都到达
     Graph->>Plan: planner_node(state)
     Note over Plan: 整合: 景点+天气+酒店+画像<br/>本地校验: 硬伤/软伤检测<br/>离群检测: 标准差法+80km硬上限<br/>画像指令注入: 预算/饮食/住宿
 
@@ -378,4 +401,4 @@ flowchart LR
 ---
 
 _定位: `/home/caoruixin/projects/tripplanner/ARCHITECTURE.md`_
-_最后更新: 2026-07-25 — 4 Node + Conditional Edge + 离群检测 + Interrupt 容错升级（SqliteSaver/退避重试/MCP超时/SSE取消/记忆去重/thread_id）_
+_最后更新: 2026-07-26 — 4 Node + **fan-out/join 拓扑** + Conditional Edge + 离群检测 + Interrupt 容错升级（SqliteSaver / 退避重试 / MCP 超时 / SSE 取消 / 记忆去重 / thread_id）+ **三处并发化**（API 预处理 intercity ∥ weather · maps_geo 双查 · 图内 memory ∥ attraction）_
