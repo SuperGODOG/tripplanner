@@ -92,7 +92,7 @@ stateDiagram-v2
     PlannerNode --> PlannerNode: retry_planner（硬伤重生成, 最多 3 次）
     PlannerNode --> HotelNode: retry_hotel（离群重算, 最多 2 次）
     PlannerNode --> [*]: done → 返回 TripPlan JSON
-    note right of PlannerNode: 本地校验: 硬伤/软伤/离群检测<br/>离群景点 → 重算中心 → 回酒店重搜<br/>自动降级标注<br/>参考 user_profile 个性化
+    note right of PlannerNode: 本地校验（硬伤/软伤/离群检测）<br/>离群景点 → 重算中心 → 回酒店重搜<br/>自动降级标注<br/>参考 user_profile 个性化
 ```
 
 ---
@@ -377,5 +377,5 @@ flowchart LR
 
 ---
 
-_定位: `/home/caoruixin/projects/tripplanner/ARCHITECTURE.md`_
+_定位: 仓库根 `ARCHITECTURE.md`（与 README.md 同目录）_
 _最后更新: 2026-07-25 — 4 Node + Conditional Edge + 离群检测 + Interrupt 容错升级（SqliteSaver/退避重试/MCP超时/SSE取消/记忆去重/thread_id）_

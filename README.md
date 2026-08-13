@@ -10,17 +10,127 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.2-purple)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.139-green)](https://fastapi.tiangolo.com/)
+[![MCP](https://img.shields.io/badge/MCP-amap--server-orange)](https://modelcontextprotocol.io)
+[![License](https://img.shields.io/badge/License-MIT-gray)](LICENSE)
 
-输入出发地 + 目的地 + 偏好 → 3 个 Agent 协作生成完整旅行计划（景点/酒店/预算），天气+城际交通在 API 层预处理，景点离群检测自动过滤远郊景点，用户画像随使用次数渐进构建。
+输入出发地 + 目的地 + 偏好 → 3 个 Agent 协作生成完整旅行计划（景点/酒店/预算），
+天气 + 城际交通在 API 层预处理，景点离群检测自动过滤远郊景点，用户画像随使用次数渐进构建。
+
+</div>
 
 ---
 
-## 🚀 快速部署
+## ✨ 功能特性
+
+- 🤖 **多智能体协作**：景点 / 酒店 / 规划 3 个 Agent 基于 LangGraph 4 Node StateGraph 编排
+- 🗺 **MCP 工具集成**：amap-mcp-server 提供 16 个高德地图工具，Agent 通过统一 Wrapper 调用
+- 🧠 **渐进式用户画像**：五因子权重公式 + 双轨异常检测（IQR + 频率比），5 次行程后画像生效
+- 🔄 **Conditional Edge 自愈**：硬伤重生成（≤3 次）+ 离群景点重算（≤2 次）
+- 🛡 **三层容错**：Error-as-Observation + error_log 累积 + FallbackTool 兜底
+- ⚡ **并发优化**：API 预处理并行、maps_geo 双查并行、LangGraph fan-out 拓扑
+- 📡 **SSE 流式响应**：前端实时展示每个 Node 的执行进度，断开自动取消
+
+---
+
+## 🏗 架构设计
+
+### 系统分层（6 层）
+
+```mermaid
+flowchart TB
+    subgraph APILayer["API 层: 请求预处理（FastAPI）"]
+        direction LR
+        PRE1["日期计算<br/>Python 本地预计算<br/>不交 LLM"]
+        PRE2["城际交通<br/>距离/时间/费用<br/>高德 API + fallback"]
+        PRE3["天气查询<br/>maps_weather 直接调用<br/>格式化后注入 State"]
+    end
+
+    subgraph Layer5["第 5 层: 多智能体编排"]
+        direction LR
+        N1["attraction_node<br/>景点 Agent + MCP"]
+        N3["hotel_node<br/>酒店 Agent + MCP"]
+        N4["memory_node<br/>加载用户画像"]
+        N5["planner_node<br/>整合 + 推理 + 离群检测"]
+    end
+
+    subgraph Layer4["第 4 层: 图编排 (LangGraph)"]
+        COND["Conditional Edge<br/>retry_planner / retry_hotel / done"]
+        CHECKPOINT["Checkpoint: SqliteSaver<br/>断点续传"]
+        RETRY["LLM 退避重试<br/>指数退避 + jitter"]
+    end
+
+    subgraph Layer3["第 3 层: 框架封装 (HelloAgents)"]
+        AGENT["SimpleAgent<br/>ReAct 循环 + add_tool()"]
+    end
+
+    subgraph Layer2["第 2 层: Agent 内循环"]
+        REACT["ReAct: Thought→Action→Observation<br/>Error-as-Observation"]
+    end
+
+    subgraph Layer1["第 1 层: 裸 LLM 调用"]
+        LLM["HelloAgentsLLM<br/>DeepSeek API"]
+    end
+
+    USER["POST /api/trip<br/>城市 + 天数 + 偏好"] --> PRE1 & PRE2 & PRE3
+    PRE1 & PRE2 & PRE3 --> N1
+    N1 --> N3 --> N4 --> N5
+    N5 --> USER
+
+    style APILayer fill:#d0ebff,stroke:#1c7ed6
+```
+
+### 状态机流转（4 Node + Conditional Edge）
+
+```mermaid
+stateDiagram-v2
+    [*] --> AttractionNode: graph.invoke(state)
+
+    AttractionNode --> HotelNode: 景点搜索完成 + 中心计算
+    note right of AttractionNode: maps_geo 获取城市中心 → maps_around 20km 搜索<br/>本地 Python 计算景点群物理中心<br/>失败时写入 error_log，不抛异常
+
+    HotelNode --> MemoryNode: 酒店搜索完成
+    note right of HotelNode: 优先使用景点中心 nearby 搜索<br/>失败时退化全城搜索
+
+    MemoryNode --> PlannerNode: 画像已注入 State
+    note right of MemoryNode: 纯本地读取 MemoryManager<br/>trip_count ≥ 5 时画像有效
+
+    PlannerNode --> PlannerNode: retry_planner（硬伤重生成, 最多 3 次）
+    PlannerNode --> HotelNode: retry_hotel（离群重算, 最多 2 次）
+    PlannerNode --> [*]: done → 返回 TripPlan JSON
+    note right of PlannerNode: 本地校验（硬伤/软伤/离群检测）<br/>离群景点 → 重算中心 → 回酒店重搜<br/>自动降级标注
+```
+
+> 📖 **完整架构文档**：7 张 Mermaid 图（分层 / 状态机 / 时序 / 工具 Wrapper / 记忆 / 错误恢复 / 分层映射）见 [ARCHITECTURE.md](ARCHITECTURE.md)
+
+### 核心设计要点
+
+| 设计 | 说明 |
+|------|------|
+| 工具封装 | Agent 视角只看到 1 个 Tool（AmapToolWrapper），内部 MCP → Format → Validate 三层 |
+| 记忆机制 | `final_weight = domain × decay × interaction × frequency_boost × outlier_penalty` |
+| 异常检测 | 数值型 IQR + 分类型频率比，偶然行为不污染画像 |
+| 容错体系 | SqliteSaver 断点续传 + LLM 退避重试 + MCP 超时 + SSE 取消 + 记忆去重 |
+
+### 技术栈
+
+| 组件 | 选型 |
+|------|------|
+| 编排引擎 | LangGraph StateGraph |
+| Agent 框架 | HelloAgents SimpleAgent |
+| 工具协议 | MCP (amap-mcp-server, 16 个工具) |
+| LLM | DeepSeek (via HelloAgentsLLM) |
+| Web 框架 | FastAPI + Pydantic v2 |
+| 记忆 | 自定义五因子权重 + 双轨异常检测 |
+| 前端 | 单文件 HTML (零依赖) |
+
+---
+
+## 🚀 快速开始
 
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/你的用户名/tripplanner.git
+git clone https://github.com/SuperGODOG/tripplanner.git
 cd tripplanner/backend
 ```
 
@@ -35,14 +145,14 @@ source venv/bin/activate       # Linux/macOS
 ### 3. 配置 API Key
 
 ```bash
-cp .env.example venv/.env
-nano venv/.env
+cp .env.example .env
+nano .env
 ```
 
 填入你的 Key：
 
 ```ini
-LLM_API_KEY=sk-your-deepseek-key
+LLM_API_KEY=your-deepseek-api-key
 LLM_MODEL_ID=deepseek-chat
 LLM_BASE_URL=https://api.deepseek.com/v1
 AMAP_API_KEY=your-amap-web-service-key
@@ -81,7 +191,20 @@ kill $(lsof -ti:8000)
 
 ---
 
-## 🗑 重置记忆模块
+## 🖥 使用指南
+
+### 前端功能
+
+| 功能 | 说明 |
+|------|------|
+| 8 维度偏好标签 | 景点/饮食/交通/节奏/住宿/预算/出行方式 |
+| 出行方式选择 | 高铁/飞机/自驾 |
+| 用户画像面板 | 0/5 渐进构建 → 5 次后展示 8 维画像 |
+| 降级列表面板 | 实时展示各步骤的降级信息 |
+| 预算可视化 | 堆叠条形图 |
+| 天气预报卡片 | 7 日预报 |
+
+### 重置记忆模块
 
 记忆数据存储在 `data/memory.json`，包含用户画像和行程计数。
 
@@ -100,137 +223,6 @@ print('行程计数已重置')
 ```
 
 画像构建需要至少 5 次行程。重置后前端显示 `0 / 5 — 正在构建画像...`。
-
----
-
-## 🏗 架构设计
-
-### 分层架构
-
-```
-第 5 层  多智能体编排     ← 4 Node LangGraph + Conditional Edge
-第 4 层  图编排框架       ← StateGraph / Edge / Conditional / Checkpoint
-第 3 层  框架封装         ← HelloAgents SimpleAgent
-第 2 层  Agent 内循环     ← ReAct (Error-as-Observation)
-第 1 层  裸 LLM 调用      ← DeepSeek API
-第 0 层  API 预处理       ← 日期计算 / 天气查询 / 城际交通 / 记忆写入
-```
-
-### 数据流向
-
-```
-POST /api/trip
-  │
-  ├─ API 预处理层
-  │   ├─ 日期列表本地计算（Python，不交 LLM）
-  │   ├─ 天气查询（maps_weather 直接调用）
-  │   ├─ 城际交通（maps_geo → maps_distance → 费用估算）
-  │   └─ 写入记忆（trip_count++）
-  │
-  └─ graph.invoke(state)
-       │
-       ├─ Node 1: attraction    ① maps_geo → 城市中心  ② maps_around 20km 搜索景点  ③ 本地 Python 计算景点群质心
-       ├─ Node 2: hotel         使用景点质心 nearby 搜索酒店
-       ├─ Node 3: memory        加载用户画像（纯本地）
-       └─ Node 4: planner       整合数据 + 本地校验（硬伤/软伤/离群检测）→ JSON
-            │
-            ├─ retry_planner: 硬伤重生成（最多 3 次）
-            ├─ retry_hotel:   离群景点 → 重算中心 → 回酒店重搜（最多 2 次）
-            └─ done:          输出最终计划
-            │
-            └─ 降级检测: 所有 error_log 累积 → 前端列表展示
-```
-
-### 技术栈
-
-| 组件 | 选型 |
-|------|------|
-| 编排引擎 | LangGraph StateGraph |
-| Agent 框架 | HelloAgents SimpleAgent |
-| 工具协议 | MCP (amap-mcp-server, 16 个工具) |
-| LLM | DeepSeek (via HelloAgentsLLM) |
-| Web 框架 | FastAPI + Pydantic v2 |
-| 记忆 | 自定义五因子权重 + 双轨异常检测 |
-| 前端 | 单文件 HTML (零依赖) |
-
-### 工具架构
-
-```
-Agent 视角:  只看到 1 个 Tool (AmapToolWrapper)
-
-内部 3 层处理:
-  第 1 层  MCP 调用    maps_text_search / maps_weather
-  第 2 层  Format       JSON → 结构化文本（纯 Python）
-  第 3 层  Validate     完整性检查 + 默认值
-```
-
-### 记忆系统
-
-**五因子权重公式：**
-
-```
-final_weight = domain × decay × interaction × frequency_boost × outlier_penalty
-```
-
-**双轨异常检测：**
-
-| 轨道 | 数据类型 | 算法 | 示例 |
-|------|---------|------|------|
-| 数值型 | 价格标签 | IQR 四分位距 | 5 次 ¥300-500 → 1 次 ¥1500 → outlier |
-| 分类型 | 偏好标签 | 频率比 | 5 次"不吃辣" → 1 次"爱吃辣" → outlier |
-
-**画像维度（8 维）：** 出行方式 / 距离偏好 / 住宿 / 预算 / 饮食 / 交通 / 节奏 / 兴趣
-
-### 扩展: Agent 反馈环与离群检测
-
-当前图是 4 Node + Conditional Edge 流: `attraction → hotel → memory → planner → [retry_planner / retry_hotel / done]`。
-
-**已实现的 Conditional Edge 路由：**
-
-| 路由 | 触发条件 | 行为 | 上限 |
-|------|---------|------|------|
-| `retry_planner` | 硬伤（缺字段/景点<2/预算超30%） | planner 自回环重生成 | MAX_RETRY=3 |
-| `retry_hotel` | 离群景点（标准差 > mean+1.5σ 或 >80km） | 重算中心 → hotel 重搜 | MAX_HOTEL_RETRY=2 |
-| `done` | 校验通过或重试耗尽 | → END | — |
-
-**离群检测双轮过滤：**
-1. **硬上限（80km）**：景点到群中心距离 >80km → 直接排除（非城市景点）
-2. **标准差法（1.5σ）**：距离 > mean + 1.5×σ → 标记离群 → 排除后重算质心 → 触发 retry_hotel
-
-LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓扑层面的路由配置，无需改动 Node 内部逻辑。
-
----
-
-## 🔮 后续更新计划
-
-- [x] **Conditional Edge 实现**：retry_planner（硬伤重生成 3 次）+ retry_hotel（离群重算 2 次）已上线
-- [ ] **多用户支持**：记忆模块加入用户隔离（当前为单用户模式）
-- [ ] **向量化记忆检索**：当前为关键词匹配，升级为 embedding + 向量相似度（适合"用户之前去杭州时喜欢什么类型"这类语义查询）
-- [x] **流式响应 (SSE)**：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度
-- [x] **API 层与图内并发**：intercity ∥ weather、maps_geo 双查、memory ∥ attraction fan-out 拓扑
-- [ ] **多 LLM 提供商**：支持 OpenAI / Claude / 本地模型切换
-- [ ] **A2A 协议集成**：Agent-to-Agent 通信，支持跨系统 Agent 协作
-- [x] **前端重构**：从单文件 HTML 迁移到 React/Vue 组件化
-- [ ] **Docker 部署**：提供 Dockerfile + docker-compose，一键启动全部服务
-- [ ] **自动化测试**：pytest 覆盖各 Node 的单元测试 + 集成测试
-
-### 容错与恢复（已落地）
-
-- **LangGraph Checkpoint**: SQLite 持久化（`data/checkpoints.db`），进程重启后断点续传
-- **LLM 退避重试**: 指数退避 max 3 次（1s → 2s → 4s）
-- **MCP 调用超时**: 10s timeout 保护（`amap_wrapper.py`）
-- **记忆去重**: 连续相同记录跳过写入
-- **SSE 取消传播**: 客户端断开后后台线程感知取消信号
-- 总计 ~200 行新增，零删除
-
-### 并发优化（已落地）
-
-三处独立任务从串行改并行，无需应用层锁——`MCPTool.run()` 每次调用内部新建独立 event loop + MCPClient 连接，无共享 mutable state；`error_log` 由 `Annotated[list, add]` reducer 合并。
-
-- **API 预处理并行** (`app/api/trip.py`)：`_compute_intercity` ∥ `_fetch_weather` 用 `ThreadPoolExecutor` 同时提交；`/api/trip` 与 `/api/trip/stream` 两个端点一致改造。预处理耗时从 `t1 + t2` 变为 `max(t1, t2)`
-- **maps_geo 双查并行** (`app/api/trip.py`)：`_compute_intercity` 内 origin/destination 地理编码同时提交，节省一次 MCP round-trip（~200-500ms）
-- **LangGraph 拓扑 fan-out** (`app/graph/builder.py`)：`START → [attraction, memory]` 并行入口 + planner 双入边 join。memory 是纯本地 JSON 读，与 attraction 的 LLM+MCP 长任务并行不阻塞；planner 自动等 hotel + memory 都到达
-- 端到端验证（上海→杭州 2 天）：`graph.invoke` 76.6s，final_plan 完整，`user_profile 加载: True` 直接证明 memory 边执行到位
 
 ---
 
@@ -260,16 +252,34 @@ tripplanner/
 
 ---
 
-## 🖥 前端功能
+## 🔮 路线图
 
-| 功能 | 说明 |
-|------|------|
-| 8 维度偏好标签 | 景点/饮食/交通/节奏/住宿/预算/出行方式 |
-| 出行方式选择 | 高铁/飞机/自驾 |
-| 用户画像面板 | 0/5 渐进构建 → 5 次后展示 8 维画像 |
-| 降级列表面板 | 实时展示各步骤的降级信息 |
-| 预算可视化 | 堆叠条形图 |
-| 天气预报卡片 | 7 日预报 |
+- [x] **Conditional Edge 实现**：retry_planner（硬伤重生成 3 次）+ retry_hotel（离群重算 2 次）已上线
+- [x] **流式响应 (SSE)**：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度
+- [x] **API 层与图内并发**：intercity ∥ weather、maps_geo 双查、memory ∥ attraction fan-out 拓扑
+- [x] **前端重构**：从单文件 HTML 迁移到 React/Vue 组件化
+- [ ] **多用户支持**：记忆模块加入用户隔离（当前为单用户模式）
+- [ ] **向量化记忆检索**：当前为关键词匹配，升级为 embedding + 向量相似度
+- [ ] **多 LLM 提供商**：支持 OpenAI / Claude / 本地模型切换
+- [ ] **A2A 协议集成**：Agent-to-Agent 通信，支持跨系统 Agent 协作
+- [ ] **Docker 部署**：提供 Dockerfile + docker-compose，一键启动全部服务
+- [ ] **自动化测试**：pytest 覆盖各 Node 的单元测试 + 集成测试
+
+### 容错与恢复（已落地）
+
+- **LangGraph Checkpoint**: SQLite 持久化（`data/checkpoints.db`），进程重启后断点续传
+- **LLM 退避重试**: 指数退避 max 3 次（1s → 2s → 4s）
+- **MCP 调用超时**: 10s timeout 保护（`amap_wrapper.py`）
+- **记忆去重**: 连续相同记录跳过写入
+- **SSE 取消传播**: 客户端断开后后台线程感知取消信号
+- 总计 ~200 行新增，零删除
+
+### 并发优化（已落地）
+
+- **API 预处理并行** (`app/api/trip.py`)：`_compute_intercity` ∥ `_fetch_weather` 用 `ThreadPoolExecutor` 同时提交，预处理耗时从 `t1 + t2` 变为 `max(t1, t2)`
+- **maps_geo 双查并行** (`app/api/trip.py`)：origin/destination 地理编码同时提交，节省一次 MCP round-trip（~200-500ms）
+- **LangGraph 拓扑 fan-out** (`app/graph/builder.py`)：`START → [attraction, memory]` 并行入口 + planner 双入边 join
+- 端到端验证（上海→杭州 2 天）：`graph.invoke` 76.6s，final_plan 完整
 
 ---
 
