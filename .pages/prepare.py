@@ -11,7 +11,8 @@ SOURCES = [
     "README.md",
     "ARCHITECTURE.md",
     "PROJECT.md",
-    "CLAUDE.md"
+    "CLAUDE.md",
+    "assets"
 ]
 
 def main():

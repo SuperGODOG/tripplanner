@@ -1,3 +1,7 @@
+<div align="center">
+
+![TripPlanner](assets/tripplanner-banner.png)
+
 # 🧳 TripPlanner
 
 > 基于 LangGraph + ReAct 自研编排的多智能体旅行规划系统
@@ -272,3 +276,5 @@ tripplanner/
 ## 📄 License
 
 MIT
+
+</div>
