@@ -2,7 +2,7 @@
 
 > Multi-Agent Trip Planner — 基于 LangGraph + HelloAgents + MCP 的多智能体旅行规划系统
 
-_精简版；详细 Phase 时间线见 [`docs/history/PROJECT.md`](history/PROJECT.md)；架构图见 [`ARCHITECTURE.md`](../ARCHITECTURE.md)；面试导向讲解见 [`docs/interview/`](interview/)。_
+_精简版；架构图见 [`ARCHITECTURE.md`](../ARCHITECTURE.md)。_
 
 ---
 
@@ -44,9 +44,7 @@ tripplanner/
 ├── ARCHITECTURE.md              # 7 张 Mermaid 架构图
 ├── docs/                        # 详细文档
 │   ├── OVERVIEW.md              # 本文件
-│   ├── interview/               # 面试导向讲解 + 问答库
-│   ├── technical-notes/         # 深入技术设计
-│   └── history/                 # Phase 1-7 历史规划 + 早期方案书
+│   └── technical-notes/         # 深入技术设计
 ├── backend/
 │   ├── app/
 │   │   ├── config.py            # 配置管理（pydantic-settings + .env）
@@ -137,10 +135,4 @@ POST /api/trip
 | 项目主页 / 部署 | [`README.md`](../README.md) |
 | 架构图（Mermaid） | [`ARCHITECTURE.md`](../ARCHITECTURE.md) |
 | Claude Code 项目备忘录 | [`CLAUDE.md`](../CLAUDE.md) |
-| 面试自我介绍脚本 | [`docs/interview/introduction.md`](interview/introduction.md) |
-| 面试问答库 | [`docs/interview/qa.md`](interview/qa.md) |
 | 分布式容错评估 | [`docs/technical-notes/interrupt-resilient-design.md`](technical-notes/interrupt-resilient-design.md) |
-| Phase 1-7 时间线原始文档 | [`docs/history/PROJECT.md`](history/PROJECT.md) |
-| Phase 1-6 单独规划文档 | [`docs/history/plan/`](history/plan/) |
-| 早期方案书 | [`docs/history/项目方案书-修正版.md`](history/项目方案书-修正版.md) |
-| 简历 | [`简历项目经历.md`](../简历项目经历.md) |

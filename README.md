@@ -263,12 +263,9 @@ tripplanner/
 ├── README.md                    # 本文件
 ├── CLAUDE.md                    # 项目备忘录（Claude Code 自动读取）
 ├── ARCHITECTURE.md              # 7 张 Mermaid 架构图
-├── 简历项目经历.md               # 简历
 ├── docs/                        # 详细文档
 │   ├── OVERVIEW.md              # 项目总览（精简版）
-│   ├── interview/               # 面试导向讲解 + 问答库
-│   ├── technical-notes/         # 深入技术设计（分布式容错评估等）
-│   └── history/                 # Phase 1-7 历史规划 + 早期方案书
+│   └── technical-notes/         # 深入技术设计（分布式容错评估等）
 ├── backend/                     # FastAPI + LangGraph
 │   ├── app/{agents,graph,tools,memory,api,models,services}
 │   ├── data/                    # memory.json + checkpoints.db
@@ -282,12 +279,7 @@ tripplanner/
 |---------|--------|
 | 项目总览（精简） | [`docs/OVERVIEW.md`](docs/OVERVIEW.md) |
 | 架构图（Mermaid） | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
-| 面试自我介绍脚本 | [`docs/interview/introduction.md`](docs/interview/introduction.md) |
-| 面试问答库 | [`docs/interview/qa.md`](docs/interview/qa.md) |
 | 分布式容错评估 | [`docs/technical-notes/interrupt-resilient-design.md`](docs/technical-notes/interrupt-resilient-design.md) |
-| Phase 1-7 时间线原始文档 | [`docs/history/PROJECT.md`](docs/history/PROJECT.md) |
-| Phase 单独规划文档 | [`docs/history/plan/`](docs/history/plan/) |
-| 早期方案书 | [`docs/history/项目方案书-修正版.md`](docs/history/项目方案书-修正版.md) |
 | 项目备忘录（环境/分支流程/设计原则） | [`CLAUDE.md`](CLAUDE.md) |
 
 ---

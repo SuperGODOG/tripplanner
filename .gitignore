@@ -10,8 +10,6 @@ __pycache__/
 
 # IDE
 .vscode/
-!.vscode/settings.json
-!.vscode/launch.json
 .idea/
 
 # 临时文件
