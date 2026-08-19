@@ -66,6 +66,8 @@ async def plan_trip(request: TripRequest):
             "intercity_cost": intercity.estimated_cost if intercity else 0,
             "distance_category": intercity.distance_category if intercity else "",
             "attraction_data": "", "weather_data": weather_data, "hotel_data": "", "center_lng": 0, "center_lat": 0, "attraction_coords": [],
+            "attraction_candidates": [], "hotel_candidates": [],
+            "urban_lng": 0, "urban_lat": 0, "excursion_pois": [],
             "attraction_status": "", "weather_status": weather_status, "hotel_status": "",
             "final_plan": {}, "error_log": errors_init,
             "user_profile": {},
@@ -109,6 +111,16 @@ async def plan_trip_stream(
 
     async def event_stream():
         try:
+            # start_date 校验（格式 + 非过去），与 POST TripRequest 规则一致
+            if start_date:
+                try:
+                    start_parsed = date.fromisoformat(start_date)
+                except ValueError:
+                    yield f"data: {json.dumps({'node': 'error', 'status': 'error', 'data': {'message': 'start_date 必须是 YYYY-MM-DD 格式的有效日期'}}, ensure_ascii=False)}\n\n"
+                    return
+                if start_parsed < date.today():
+                    yield f"data: {json.dumps({'node': 'error', 'status': 'error', 'data': {'message': 'start_date 不能早于今天'}}, ensure_ascii=False)}\n\n"
+                    return
             prefs = [p.strip() for p in preferences.split(",") if p.strip()]
             start = start_date or date.today().isoformat()
             date_list = [(date.fromisoformat(start) + timedelta(days=i)).isoformat() for i in range(days)]
@@ -143,6 +155,8 @@ async def plan_trip_stream(
                 "intercity_cost": intercity.estimated_cost if intercity else 0,
                 "distance_category": intercity.distance_category if intercity else "",
                 "attraction_data": "", "weather_data": weather_data, "hotel_data": "", "center_lng": 0, "center_lat": 0, "attraction_coords": [],
+                "attraction_candidates": [], "hotel_candidates": [],
+                "urban_lng": 0, "urban_lat": 0, "excursion_pois": [],
                 "attraction_status": "", "weather_status": weather_status, "hotel_status": "",
                 "final_plan": {}, "error_log": errors_init, "user_profile": {},
             }

@@ -2,17 +2,19 @@
 
 Phase 3 核心概念 #3: Graph + Edge + Conditional Routing
 
-图结构（4 Node: 天气已移至 API 层）:
+图结构（4 Node: 天气已移至 API 层，attraction/hotel 为确定性检索节点）:
   START → attraction → hotel → memory → planner → [conditional]
-                                            ↙     ↓      ↘
-                              retry_planner  retry_hotel  done
-                              (硬伤重生成)   (离群重算)    END
+                                            ↙      ↘
+                              retry_planner         done
+                              (硬伤重生成)           END
 
 conditional edge:
   planner 执行后，_validate_and_refine() 写入 state.planner_route:
   - "retry_planner" → 自回环重新生成（最多 3 次）
-  - "retry_hotel"    → 回酒店用新中心重搜
   - "done" → END
+
+2026-08 重构: retry_hotel 回环已删除——离群检测不再触发酒店重搜，
+远郊景点由 attraction_node 标记 excursion（一日游），酒店选址用市区质心。
 
 Phase 3 核心概念 #4: Checkpoint（SQLite 持久化）
 
@@ -38,7 +40,7 @@ def _route_planner(state: TripPlannerState) -> str:
     return route
 
 
-def build_trip_graph() -> StateGraph:
+def build_trip_graph(checkpointer=None):
     """
     构建 TripPlanner LangGraph。
 
@@ -54,16 +56,24 @@ def build_trip_graph() -> StateGraph:
     ┌────▼─────┐                │
     │   hotel   │               │
     └────┬─────┘                │
-         └─────────┬────────────┘   ← join (planner 等两者)
+         └─────────┬────────────┘   ← 都汇入 planner（经 state 共享，无 join 边）
               ┌────▼─────┐
-              │  planner  │──conditional──→ retry_planner / retry_hotel / done
+              │  planner  │──conditional──→ retry_planner / done
               └──────────┘
 
-    memory_node 无外部依赖（只读 memory.json），且不读 state 任何字段，
-    与 attraction_node 并行安全。写入字段无冲突：
-      - attraction_node 写 attraction_data/status/center_*/coords
+    memory_node 与 attraction_node 并行安全（各自写不同字段）：
+      - attraction_node 写 candidates/center_*/coords/excursion
       - memory_node    写 user_profile
     共同 error_log 由 Annotated[list, add] reducer 自动合并。
+
+    注意（2026-08 实测）: LangGraph 1.2.9 对跨 superstep 的 fan-in 是
+    "每条入边各触发一次"，不是 join——planner 若同时挂 hotel→planner 与
+    memory→planner 两条边会被触发两次（LLM 调用双倍）。
+    因此 memory 结果经共享 state 传递（planner 读 state["user_profile"]），
+    planner 只保留 hotel 单入边。memory 为本地 SQLite 读（ms 级），
+    必然先于 attraction→hotel 的 MCP 网络调用（秒级）完成。
+
+    checkpointer: 默认 SqliteSaver（持久化）；测试可注入 InMemorySaver。
     """
 
     # 1. 创建 StateGraph——核心对象，管理所有 Node 和 Edge
@@ -81,33 +91,34 @@ def build_trip_graph() -> StateGraph:
 
     # 4. Edge:
     #   attraction → hotel → planner  (主链路)
-    #   memory     → planner          (旁路 join: planner 有两个入边，等两者都到达)
+    #   memory     → (state 共享)     (并行分支：结果经 state 写入，无 join 边)
+    #   注意: 不添加 memory → planner 边——LangGraph 1.2.9 跨 superstep fan-in
+    #   每条入边触发一次节点，会导致 planner 执行两次（详见模块 docstring）。
     graph.add_edge("attraction", "hotel")
     graph.add_edge("hotel", "planner")
-    graph.add_edge("memory", "planner")
 
-    # 5. Conditional edge: planner → retry_planner / retry_hotel / done
+    # 5. Conditional edge: planner → retry_planner / done
     graph.add_conditional_edges(
         "planner",
         _route_planner,
         {
             "retry_planner": "planner",     # 硬伤 → 自回环重生成
-            "retry_hotel": "hotel",         # 离群 → 回酒店用新中心重搜
             "done": END,
         }
     )
 
-    # 6. 编译——生成可执行的图，使用 SQLite 持久化 Checkpoint
-    # builder.py 在 backend/app/graph/ 下，上溯 3 层到项目根，然后 data/
-    _project_root = os.path.abspath(os.path.join(
-        os.path.dirname(__file__), "..", "..", ".."))
-    data_dir = os.path.join(_project_root, "data")
-    os.makedirs(data_dir, exist_ok=True)
+    # 6. 编译——生成可执行的图，使用 SQLite 持久化 Checkpoint（测试可注入内存版）
+    if checkpointer is None:
+        # builder.py 在 backend/app/graph/ 下，上溯 3 层到项目根，然后 data/
+        _project_root = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "..", ".."))
+        data_dir = os.path.join(_project_root, "data")
+        os.makedirs(data_dir, exist_ok=True)
 
-    # SQLite 连接：check_same_thread=False 因为 LangGraph 在不同线程读写 checkpoint
-    db_path = os.path.join(data_dir, "checkpoints.db")
-    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
-    checkpointer = SqliteSaver(conn)
+        # SQLite 连接：check_same_thread=False 因为 LangGraph 在不同线程读写 checkpoint
+        db_path = os.path.join(data_dir, "checkpoints.db")
+        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
+        checkpointer = SqliteSaver(conn)
 
     return graph.compile(checkpointer=checkpointer)
 def get_trip_graph():

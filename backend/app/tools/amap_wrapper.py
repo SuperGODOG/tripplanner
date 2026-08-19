@@ -10,13 +10,14 @@ Wrapper 内部路径:
   params["type"]=="attraction"→ MCP → geo 增强 → format → validate
   params["type"]=="hotel"     → MCP → geo 增强 → format → validate
   params["type"]=="weather"   → MCP → format → validate（跳过 geo）
-  params["type"]=="around"    → 新路径: maps_around（周边搜索，自带坐标）
+  params["type"]=="around"    → 新路径: maps_around_search（周边搜索，POI 无坐标需 geo 增强）
 """
 import json, re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout, as_completed
 from typing import Any
 from hello_agents.tools import Tool, ToolParameter
 from ..services.amap_service import get_amap_mcp_tool
+from ..models.candidates import PoiCandidate, HotelCandidate
 
 
 class AmapToolWrapper(Tool):
@@ -66,6 +67,79 @@ class AmapToolWrapper(Tool):
         return self._validate(formatted, stype, city)
 
     # ================================================================
+    # 结构化查询入口（确定性节点直连，不经 LLM）
+    # ================================================================
+
+    def search_pois(self, city: str, stype: str, keywords: str = "",
+                    center: str = "", radius: str = "",
+                    max_results: int = 10) -> list[PoiCandidate]:
+        """返回结构化候选列表，坐标/来源/价格全程字段化。
+
+        stype: attraction / hotel / around / food
+        - around: 以 center 为中心周边搜索（radius 米）
+        - food:   around 的别名，默认 radius=500（景点周边美食软推荐）
+        """
+        raw = self._call_mcp(city, stype, keywords, center, radius)
+        # maps_around_search / maps_text_search 的 POI 均无 location 字段，
+        # 必须按地址 maps_geo 增强坐标，否则候选全部因缺坐标被丢弃
+        if stype in ("attraction", "hotel", "around", "food"):
+            raw = self._enrich_pois_with_coords(raw)
+        data = self._extract_json(raw)
+        pois = data.get("pois", []) if isinstance(data, dict) else []
+        if not pois:
+            return []
+
+        cls = HotelCandidate if (stype == "hotel" or "酒店" in (keywords or "")) else PoiCandidate
+        out: list[PoiCandidate] = []
+        for p in pois[:max_results]:
+            cand = self._candidate_from_poi(p, cls)
+            if cand is not None:
+                out.append(cand)
+        return out
+
+    def _candidate_from_poi(self, poi: dict, cls: type) -> PoiCandidate | None:
+        """把高德原始 POI 字典转成结构化候选；坐标缺失则丢弃。"""
+        name = str(poi.get("name", "") or "")
+        if not name:
+            return None
+
+        lng, lat = poi.get("_lng"), poi.get("_lat")
+        if lng is None or lat is None:
+            loc = str(poi.get("location", "") or "")
+            if loc and "," in loc:
+                try:
+                    lng, lat = (float(v) for v in loc.split(","))
+                except ValueError:
+                    return None
+        if lng is None or lat is None:
+            return None
+
+        price: float | None = None
+        raw_price = poi.get("price") or poi.get("cost")
+        if raw_price:
+            try:
+                price = float(str(raw_price).replace("元", "").strip())
+            except ValueError:
+                price = None
+
+        common: dict[str, Any] = dict(
+            name=name, lng=float(lng), lat=float(lat),
+            address=str(poi.get("address", "") or ""),
+            district=str(poi.get("adname", "") or ""),
+            category=str(poi.get("type", "") or ""),
+            price=price,
+        )
+        if cls is HotelCandidate:
+            htype = str(poi.get("type", "") or "").split(";")[-1]
+            return HotelCandidate(
+                **common,
+                rating=str(poi.get("rating", "") or ""),
+                price_range=str(poi.get("price_range", "") or ""),
+                hotel_type=htype,
+            )
+        return PoiCandidate(**common)
+
+    # ================================================================
     # 第 1 层: MCP 调用
     # ================================================================
 
@@ -75,10 +149,13 @@ class AmapToolWrapper(Tool):
                 "action": "call_tool", "tool_name": "maps_weather",
                 "arguments": {"city": city},
             })
-        if stype == "around" and center:
+        if stype in ("around", "food") and center:
+            default_radius = "500" if stype == "food" else "5000"
             return self._mcp_run_with_timeout({
-                "action": "call_tool", "tool_name": "maps_around",
-                "arguments": {"location": center, "keywords": kw or "酒店", "radius": radius or "5000"},
+                "action": "call_tool", "tool_name": "maps_around_search",
+                "arguments": {"location": center,
+                              "keywords": kw or ("美食" if stype == "food" else "酒店"),
+                              "radius": radius or default_radius},
             })
         return self._mcp_run_with_timeout({
             "action": "call_tool", "tool_name": "maps_text_search",

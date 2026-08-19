@@ -23,23 +23,25 @@ class TripPlannerState(TypedDict, total=False):
     intercity_cost: int
     distance_category: str
 
-    # ── 各 Agent 输出 ──
+    # ── 结构化候选（确定性节点产出，字段化传递）──
+    attraction_candidates: list      # [PoiCandidate.model_dump(), ...]
+    hotel_candidates: list           # [HotelCandidate.model_dump(), ...]
+
+    # ── 文本摘要（planner prompt 用，本地生成）──
     attraction_data: str
     weather_data: str
     hotel_data: str
 
     # ── 空间计算（attraction_node 产出）──
-    center_lng: float             # 景点群物理中心经度
-    center_lat: float             # 景点群物理中心纬度
-    attraction_coords: list       # [{name, lng, lat}, ...]
-
-    # ── 中心覆写（planner 离群检测后产出）──
-    center_lng_override: float    # 去掉离群景点后新中心经度
-    center_lat_override: float    # 去掉离群景点后新中心纬度
+    center_lng: float                # 全部候选质心经度
+    center_lat: float                # 全部候选质心纬度
+    urban_lng: float                 # 市区质心经度（去远郊，酒店选址用）
+    urban_lat: float                 # 市区质心纬度
+    attraction_coords: list          # [{name, lng, lat}, ...]
+    excursion_pois: list             # [{name, dist_km}, ...] 远郊一日游标记
 
     # ── 重试计数器 ──
-    planner_retry_count: int      # Planner 自回环计数
-    hotel_retry_count: int        # Hotel 回环计数（离群重算）
+    planner_retry_count: int         # Planner 自回环计数
 
     # ── 状态标记 ──
     attraction_status: str
@@ -47,8 +49,7 @@ class TripPlannerState(TypedDict, total=False):
     hotel_status: str
 
     # ── Planner 回环控制 ──
-    planner_route: str                 # "done" / "retry_planner" / "retry_hotel"
-    planner_retry_count: int           # Planner 重试计数（最多 3 次）
+    planner_route: str               # "done" / "retry_planner"
 
     # ── 最终输出 ──
     final_plan: dict

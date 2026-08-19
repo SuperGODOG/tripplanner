@@ -1,7 +1,24 @@
-"""LangGraph Node 函数 — 支持 SSE 进度事件"""
+"""LangGraph Node 函数 — 确定性检索节点 + 唯一 LLM planner 节点
+
+2026-08 重构:
+- attraction/hotel 从"LLM 转发伪 Agent"改为确定性检索（AmapToolWrapper.search_pois 直连）
+- 坐标全程字段化（PoiCandidate），不再走 Markdown + 📍 正则
+- 多偏好全量召回（并行）→ 稳定 ID 去重
+- 远郊（>80km）标记 excursion 一日游，不再删除；酒店选址用市区质心
+- retry_hotel 回环删除（离群不再触发酒店重搜），图只剩 planner 自回环
+- 三餐由 _enrich_meals 用真实美食 POI 填充（每天第一个景点 500m 周边）
+"""
+import math
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
+
 from .state import TripPlannerState
 from .context import event_sink_from_config
 from ..agents.trip_planner_agent import get_planner
+from ..tools.amap_wrapper import AmapToolWrapper
+from ..services.amap_service import get_amap_mcp_tool
+
 
 def _emit(config: dict | None, node: str, status: str, data: dict | None = None) -> None:
     sink = event_sink_from_config(config)
@@ -9,95 +26,214 @@ def _emit(config: dict | None, node: str, status: str, data: dict | None = None)
         sink.emit(node, status, data)
 
 
+# ── 常量 ──
+MAX_RETRY = 3                # Planner 自回环最大次数（硬伤重生成）
+EXCURSION_KM = 80            # >80km → 远郊一日游标记（业务语义，非删除）
+MAX_HOTEL_DIST_KM = 10       # 酒店到最远景点距离阈值（软伤）
+BUDGET_OVER_PCT = 0.3        # 预算超用户偏好 30%（硬伤）
+
+
+# ── 确定性检索单例 ──
+_amap_wrapper: AmapToolWrapper | None = None
+
+
+def _get_amap_wrapper() -> AmapToolWrapper:
+    global _amap_wrapper
+    if _amap_wrapper is None:
+        _amap_wrapper = AmapToolWrapper()
+    return _amap_wrapper
+
+
+# ================================================================
+# 工具函数
+# ================================================================
+
+def _city_center(city: str) -> tuple[str, str] | None:
+    """maps_geo 本地调用获取城市中心坐标（不经过 LLM）。"""
+    try:
+        mcp = get_amap_mcp_tool()
+        geo_result = mcp.run({
+            "action": "call_tool", "tool_name": "maps_geo",
+            "arguments": {"address": city},
+        })
+        m = re.search(r'"location"\s*:\s*"([\d.]+),([\d.]+)"', str(geo_result))
+        if m:
+            return m.group(1), m.group(2)
+    except Exception:
+        pass
+    return None
+
+
+def _haversine_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
+    """两点间 Haversine 直线距离 (km)"""
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(dlng / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _format_candidates(cands: list, excursions: list | None = None) -> str:
+    """结构化候选 → planner prompt 文本（本地生成，不经 LLM 转发）。"""
+    exc_names = {e["name"] for e in (excursions or [])}
+    lines = ["【景点搜索结果】"]
+    for i, c in enumerate(cands, 1):
+        parts = [f"{i}. {c.name}"]
+        if c.name in exc_names:
+            parts.append("【远郊】")
+        if c.district:
+            parts.append(f"[{c.district}]")
+        if c.address:
+            parts.append(c.address)
+        parts.append(f"({c.lng},{c.lat})")
+        if c.category:
+            parts.append(c.category)
+        if c.price is not None:
+            parts.append(f"参考价¥{c.price:.0f}")
+        lines.append(" | ".join(parts))
+    if not cands:
+        lines.append("无")
+    return "\n".join(lines)
+
+
+def _format_hotels(cands: list) -> str:
+    """酒店候选 → planner prompt 文本。"""
+    lines = ["【酒店搜索结果】"]
+    for i, c in enumerate(cands, 1):
+        parts = [f"{i}. {c.name}"]
+        if c.hotel_type:
+            parts.append(c.hotel_type)
+        if c.rating:
+            parts.append(f"评分{c.rating}")
+        if c.price_range:
+            parts.append(c.price_range)
+        if c.address:
+            parts.append(c.address)
+        parts.append(f"({c.lng},{c.lat})")
+        lines.append(" | ".join(parts))
+    if not cands:
+        lines.append("无")
+    return "\n".join(lines)
+
+
+# ================================================================
+# Node 1: 景点检索（确定性，多偏好并行召回）
+# ================================================================
+
 def attraction_node(state: TripPlannerState, config: dict | None = None) -> dict:
     _emit(config, "attraction", "start")
     city = state["city"]
-    prefs = state.get("preferences", [])
+    prefs = state.get("preferences", []) or []
     try:
-        planner = get_planner()
-        kw = prefs[0] if prefs else "景点"
+        wrapper = _get_amap_wrapper()
+        center = _city_center(city)
 
-        # ── 获取城市中心坐标（maps_geo）──
-        import re
-        from ..services.amap_service import get_amap_mcp_tool
-        mcp = get_amap_mcp_tool()
-        center_lng = center_lat = None
-        try:
-            geo_result = mcp.run({
-                "action": "call_tool", "tool_name": "maps_geo",
-                "arguments": {"address": city},
-            })
-            geo_match = re.search(r'"location"\s*:\s*"([\d.]+),([\d.]+)"', str(geo_result))
-            if geo_match:
-                center_lng, center_lat = geo_match.group(1), geo_match.group(2)
-        except Exception:
-            pass
+        # ── 多偏好全量召回：每个偏好一个周边搜索，并行执行 ──
+        keywords = [p.strip() for p in prefs if p.strip()] or ["景点"]
+        center_str = f"{center[0]},{center[1]}" if center else ""
+        merged: list = []
+        with ThreadPoolExecutor(max_workers=min(len(keywords), 5)) as pool:
+            futures = {}
+            for kw in keywords:
+                if center_str:
+                    fut = pool.submit(wrapper.search_pois, city, "around", kw, center_str, "20000")
+                else:
+                    fut = pool.submit(wrapper.search_pois, city, "attraction", kw)
+                futures[fut] = kw
+            for fut in as_completed(futures):
+                try:
+                    merged.extend(fut.result())
+                except Exception as e:
+                    print(f"⚠️ [景点搜索] 偏好「{futures[fut]}」失败: {e}")
 
-        if center_lng and center_lat:
-            center = f"{center_lng},{center_lat}"
-            print(f"🗺️  [景点搜索] 城市中心 ({center_lng},{center_lat})，使用 maps_around radius=20km")
-            result = planner._run_agent_with_retry(planner.attraction_agent,
-                f"请搜索{city}的{kw}相关景点。\n"
-                f"[TOOL_CALL:amap_search:city={city},type=around,keywords={kw},center={center},radius=20000]"
-            )
-        else:
-            print(f"⚠️  [景点搜索] maps_geo 失败，退化全城 text_search")
-            result = planner._run_agent_with_retry(planner.attraction_agent,
-                f"请搜索{city}的{kw}相关景点。\n"
-                f"[TOOL_CALL:amap_search:city={city},type=attraction,keywords={kw}]"
-            )
-        _emit(config, "attraction", "done", {"status": "success"})
+        # ── 稳定 ID 去重融合 ──
+        seen: dict[str, Any] = {}
+        for p in merged:
+            seen.setdefault(p.id, p)
+        candidates = list(seen.values())
+        candidates.sort(key=lambda c: c.name)
+        if not candidates:
+            raise RuntimeError("未检索到任何景点")
 
-        # ── 计算景点群物理中心（本地 Python，不交 LLM）──
-        import re
-        coords = re.findall(r"📍\(([\d.]+),([\d.]+)\)", result)
-        parsed = [{"name": "?", "lng": float(c[0]), "lat": float(c[1])} for c in coords]
-        center = {}
-        if parsed:
-            clng = sum(p["lng"] for p in parsed) / len(parsed)
-            clat = sum(p["lat"] for p in parsed) / len(parsed)
-            center = {"center_lng": round(clng, 6), "center_lat": round(clat, 6),
-                      "attraction_coords": parsed}
-            print(f"🗺️  [中心计算] 景点数={len(parsed)} center_lng={round(clng,6)} center_lat={round(clat,6)}")
-        else:
-            print(f"⚠️  [中心计算] 未找到坐标标记，跳过中心计算")
+        # ── 质心 + 市区质心 + 远郊标记（本地计算，不交 LLM）──
+        # 远郊判定基准：城市中心（业务语义"距市中心 >80km"）；拿不到则用候选质心
+        coords = [{"name": c.name, "lng": c.lng, "lat": c.lat} for c in candidates]
+        n = len(coords)
+        clng = sum(c["lng"] for c in coords) / n
+        clat = sum(c["lat"] for c in coords) / n
+        base_lng, base_lat = clng, clat
+        if center:
+            try:
+                base_lng, base_lat = float(center[0]), float(center[1])
+            except (ValueError, TypeError):
+                pass
 
-        return {"attraction_data": result, "attraction_status": "success", **center}
+        urban, excursions = [], []
+        for c in coords:
+            d = _haversine_km(base_lng, base_lat, c["lng"], c["lat"])
+            if d > EXCURSION_KM:
+                excursions.append({"name": c["name"], "dist_km": round(d, 1)})
+            else:
+                urban.append(c)
+
+        urban_center = {}
+        if urban:
+            urban_center = {
+                "urban_lng": round(sum(c["lng"] for c in urban) / len(urban), 6),
+                "urban_lat": round(sum(c["lat"] for c in urban) / len(urban), 6),
+            }
+
+        text = _format_candidates(candidates, excursions)
+        _emit(config, "attraction", "done", {"status": "success", "count": len(candidates)})
+        return {
+            "attraction_data": text,
+            "attraction_candidates": [c.model_dump() for c in candidates],
+            "attraction_status": "success",
+            "center_lng": round(clng, 6), "center_lat": round(clat, 6),
+            "attraction_coords": coords,
+            "excursion_pois": excursions,
+            **urban_center,
+        }
     except Exception as e:
         _emit(config, "attraction", "done", {"status": "failed"})
-        return {"attraction_data": "", "attraction_status": "failed",
+        return {"attraction_data": "", "attraction_candidates": [],
+                "attraction_status": "failed",
                 "error_log": [f"景点搜索失败: {str(e)}"]}
 
+
+# ================================================================
+# Node 2: 酒店检索（确定性，市区质心周边）
+# ================================================================
 
 def hotel_node(state: TripPlannerState, config: dict | None = None) -> dict:
     _emit(config, "hotel", "start")
     city = state["city"]
     try:
-        planner = get_planner()
-        # 优先使用覆写中心（离群检测后），其次原始中心
-        clng = state.get("center_lng_override") or state.get("center_lng")
-        clat = state.get("center_lat_override") or state.get("center_lat")
-        if clng and clat:
-            override = state.get("center_lng_override")
-            tag = "覆写中心" if override else "原始中心"
-            print(f"🏨 [酒店搜索] 使用{tag} center=({clng},{clat})")
-            result = planner._run_agent_with_retry(planner.hotel_agent,
-                f"请以坐标({clng},{clat})为中心搜索{city}的酒店。\n"
-                f"[TOOL_CALL:amap_search:city={city},type=around,center={clng},{clat},keywords=酒店]"
-            )
+        wrapper = _get_amap_wrapper()
+        ulng, ulat = state.get("urban_lng"), state.get("urban_lat")
+        if ulng and ulat:
+            print(f"🏨 [酒店搜索] 市区质心 ({ulng},{ulat}) 周边 5km")
+            cands = wrapper.search_pois(city, "around", "酒店", f"{ulng},{ulat}", "5000")
         else:
-            # 退化为全城搜索
-            print(f"🏨 [酒店搜索] 无中心坐标，退化为全城搜索")
-            result = planner._run_agent_with_retry(planner.hotel_agent,
-                f"请搜索{city}的酒店。\n[TOOL_CALL:amap_search:city={city},type=hotel]"
-            )
-        _emit(config, "hotel", "done", {"status": "success"})
-        return {"hotel_data": result, "hotel_status": "success"}
+            print(f"🏨 [酒店搜索] 无市区质心，退化为全城搜索")
+            cands = wrapper.search_pois(city, "hotel", "酒店")
+        text = _format_hotels(cands)
+        _emit(config, "hotel", "done", {"status": "success", "count": len(cands)})
+        return {"hotel_data": text,
+                "hotel_candidates": [c.model_dump() for c in cands],
+                "hotel_status": "success"}
     except Exception as e:
         _emit(config, "hotel", "done", {"status": "failed"})
-        return {"hotel_data": "", "hotel_status": "failed",
+        return {"hotel_data": "", "hotel_candidates": [],
+                "hotel_status": "failed",
                 "error_log": [f"酒店搜索失败: {str(e)}"]}
 
+
+# ================================================================
+# Node 3: 记忆读取（租户隔离，纯本地）
+# ================================================================
 
 def memory_node(state: TripPlannerState, config: dict | None = None) -> dict:
     _emit(config, "memory", "start")
@@ -111,33 +247,17 @@ def memory_node(state: TripPlannerState, config: dict | None = None) -> dict:
         return {"error_log": [f"记忆加载失败: {str(e)}"]}
 
 
-# ── 常量 ──
-MAX_RETRY = 3               # Planner 自回环最大次数
-MAX_HOTEL_RETRY = 2          # 酒店回环最大次数（离群重算）
-OUTLIER_SIGMA = 1.5           # 离群阈值（标准差倍数）：距离 > mean + k*sigma → 离群
-MAX_HOTEL_DIST_KM = 10      # 酒店到最远景点距离阈值（软伤）
-BUDGET_OVER_PCT = 0.3       # 预算超用户偏好 30%（硬伤）
-MAX_ATTRACTION_RANGE_KM = 80   # 景点硬上限：超过此距离直接排除（非城市景点）
-
-
-def _haversine_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
-    """两点间 Haversine 直线距离 (km)"""
-    import math
-    R = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlng = math.radians(lng2 - lng1)
-    a = (math.sin(dlat / 2) ** 2 +
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-         math.sin(dlng / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
+# ================================================================
+# 校验与回环
+# ================================================================
 
 def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
-    """本地校验：硬伤/软伤/离群检测 → 返回 {route, ...}"""
-    import math
+    """本地校验：硬伤（重试）/ 软伤（警告）→ 路由决策。
 
+    2026-08 重构: 离群检测已移至 attraction_node（excursion 标记），
+    此处不再删除景点、不再触发 retry_hotel 回环。
+    """
     retry_count = state.get("planner_retry_count", 0)
-    days = state.get("days", 1)
     profile = state.get("user_profile", {})
     error_log: list[str] = []
     hard_errors: list[str] = []
@@ -147,19 +267,16 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
     if not plan_days:
         hard_errors.append("plan 缺少 .days 字段")
 
-    # 每天景点数
     for d in plan_days:
         attrs = d.get("attractions", [])
         if len(attrs) < 2:
             hard_errors.append(f"{d.get('date', '?')}: 景点数 {len(attrs)} < 2")
 
-    # 必填字段
     required = ["city", "start_date", "days", "budget", "overall_suggestions"]
     for f in required:
         if f not in plan:
             hard_errors.append(f"缺少必填字段: {f}")
 
-    # 预算约束
     budget = plan.get("budget", {})
     total = budget.get("total", 0) if isinstance(budget, dict) else 0
     requested_budget = state.get("budget_total")
@@ -177,7 +294,6 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
     # ── 1b. 软伤检测 ──
     warnings: list[str] = []
 
-    # 酒店到最远景点距离
     for d in plan_days:
         hotel = d.get("hotel", {})
         hloc = hotel.get("location", {})
@@ -197,7 +313,6 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
                 warnings.append(
                     f"{d.get('date', '?')}: 酒店到最远景点 {max_d:.1f}km > {MAX_HOTEL_DIST_KM}km")
 
-    # 天气不适宜（暴雨 + 户外景点）
     weather_info = plan.get("weather_info", [])
     outdoor_cats = ["自然", "公园", "爬山", "户外", "登山", "徒步", "海滩", "动物园"]
     for d in plan_days:
@@ -213,75 +328,7 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
                 warnings.append(
                     f"{date}: {day_weather}天安排了户外景点: {', '.join(outdoor_attrs)}")
 
-    # ── 1c. 离群景点检测 ──
-    coords = state.get("attraction_coords", [])
-    override_lng, override_lat = None, None
-    outlier_names: list[str] = []
-
-    if coords and len(coords) >= 3:
-        # 原始中心
-        orig_clng = state.get("center_lng", 0)
-        orig_clat = state.get("center_lat", 0)
-
-        # 计算每个景点到中心距离
-        dists = []
-        for c in coords:
-            d = _haversine_km(orig_clng, orig_clat, c["lng"], c["lat"])
-            dists.append(d)
-
-        # ── 第一轮：硬上限检测（>MAX_ATTRACTION_RANGE_KM 直接排除）──
-        hard_outliers = []
-        remaining_coords = []
-        remaining_dists = []
-        for i, c in enumerate(coords):
-            if dists[i] > MAX_ATTRACTION_RANGE_KM:
-                hard_outliers.append((i, c, dists[i]))
-            else:
-                remaining_coords.append(c)
-                remaining_dists.append(dists[i])
-
-        if hard_outliers:
-            for _, c, d in hard_outliers:
-                name = c.get("name", "?")
-                outlier_names.append(name)
-                print(f"     {name}: {d:.1f}km ← 硬上限排除 (>{MAX_ATTRACTION_RANGE_KM}km)")
-
-        # ── 第二轮：标准差离群检测（仅对剩余景点）──
-        if remaining_dists:
-            avg_dist = sum(remaining_dists) / len(remaining_dists)
-            n = len(remaining_dists)
-            if n > 1:
-                variance = sum((d - avg_dist) ** 2 for d in remaining_dists) / n
-                sigma = variance ** 0.5
-            else:
-                sigma = 0
-
-            threshold = avg_dist + OUTLIER_SIGMA * sigma if sigma > 0 else avg_dist * 2
-
-            print(f"  📏 景点距离: avg={avg_dist:.1f}km sigma={sigma:.1f}km threshold={threshold:.1f}km")
-            for i, d in enumerate(remaining_dists[:5]):
-                flag = " ← 离群" if d > threshold else ""
-                print(f"     {remaining_coords[i].get('name','?')}: {d:.1f}km{flag}")
-
-            # 标记标准差离群
-            inliers = []
-            for i, c in enumerate(remaining_coords):
-                if remaining_dists[i] > threshold:
-                    name = c.get("name", f"景点{i}")
-                    outlier_names.append(name)
-                else:
-                    inliers.append(c)
-        else:
-            inliers = []
-
-        # 去掉离群景点重新算中心
-        if outlier_names and inliers:
-            override_lng = round(sum(c["lng"] for c in inliers) / len(inliers), 6)
-            override_lat = round(sum(c["lat"] for c in inliers) / len(inliers), 6)
-            warnings.append(
-                f"离群景点: {', '.join(outlier_names)} → 新中心 ({override_lng}, {override_lat})")
-
-    # ── 返回路由决策 ──
+    # ── 路由决策 ──
     if hard_errors and retry_count < MAX_RETRY:
         error_log.append(f"硬伤 #{retry_count + 1}: {'; '.join(hard_errors)}")
         return {
@@ -290,7 +337,6 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
             "planner_retry_count": retry_count + 1,
         }
 
-    # 重试次数耗尽 → 硬伤降级为软伤，强制 done
     exhausted = hard_errors and retry_count >= MAX_RETRY
     if exhausted:
         error_log.append(f"硬伤（重试{MAX_RETRY}次仍失败）: {'; '.join(hard_errors)}")
@@ -306,41 +352,97 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
             result["error_log"] = error_log + result["error_log"]
         else:
             result["error_log"] = error_log
-
-    # ── 酒店重试上限 ──
-    hotel_retry_count = state.get("hotel_retry_count", 0)
-    hotel_exhausted = hotel_retry_count >= MAX_HOTEL_RETRY
-
-    # 离群景点 → 写入 override 并触发 retry_hotel
-    if not exhausted and not hotel_exhausted and override_lng is not None and override_lat is not None:
-        result["center_lng_override"] = override_lng
-        result["center_lat_override"] = override_lat
-        result["planner_route"] = "retry_hotel"
-        result["hotel_retry_count"] = hotel_retry_count + 1
-
     return result
 
+
+# ================================================================
+# 坐标溯源
+# ================================================================
+
+def _ground_truth_coordinates(plan: dict, state: TripPlannerState) -> None:
+    """用结构化候选的真实坐标覆盖 LLM 输出的坐标（防幻觉）。
+
+    LLM 可能在 JSON 里写出偏差/错误坐标（实测出现过 1300km 级误差），
+    而候选坐标来自高德检索。按名称匹配后覆盖 location 字段。
+    """
+    attrs_by_name = {c["name"]: c for c in state.get("attraction_candidates", [])}
+    hotels_by_name = {c["name"]: c for c in state.get("hotel_candidates", [])}
+    for d in plan.get("days", []):
+        for a in d.get("attractions", []):
+            cand = attrs_by_name.get(a.get("name", ""))
+            if cand:
+                a["location"] = {"longitude": cand["lng"], "latitude": cand["lat"]}
+        hotel = d.get("hotel", {})
+        cand = hotels_by_name.get(hotel.get("name", ""))
+        if cand:
+            hotel["location"] = {"longitude": cand["lng"], "latitude": cand["lat"]}
+
+
+# ================================================================
+# 三餐真实数据落地
+# ================================================================
+
+def _enrich_meals(plan: dict, city: str) -> None:
+    """用真实美食 POI 填充每天三餐（每天第一个景点 500m 周边）。
+
+    替换 LLM 编造餐厅；失败静默降级（meals 保持原样，不阻塞计划）。
+    """
+    try:
+        wrapper = _get_amap_wrapper()
+    except Exception:
+        return
+    for d in plan.get("days", []):
+        attrs = d.get("attractions", [])
+        if not attrs:
+            continue
+        a = attrs[0]
+        loc = a.get("location", {})
+        lng = loc.get("longitude") or loc.get("lng")
+        lat = loc.get("latitude") or loc.get("lat")
+        if not lng or not lat:
+            continue
+        try:
+            foods = wrapper.search_pois(city, "food", "", f"{lng},{lat}", "", max_results=3)
+        except Exception:
+            continue
+        if not foods:
+            continue
+        meal_types = ["breakfast", "lunch", "dinner"]
+        meals = []
+        for i, f in enumerate(foods[:3]):
+            meals.append({
+                "type": meal_types[i],
+                "name": f.name,
+                "description": f"{f.district} {f.category}".strip() or f.address,
+                "estimated_cost": int(f.price or 0),
+                "source": f.source,
+                "location": {"longitude": f.lng, "latitude": f.lat},
+            })
+        if meals:
+            d["meals"] = meals
+            print(f"🍽️ [三餐] {d.get('date', '?')}: 已用真实美食 POI 填充 {len(meals)} 餐")
+
+
+# ================================================================
+# Node 4: Planner（唯一 LLM 调用）
+# ================================================================
 
 def _build_profile_constraints(profile: dict) -> str:
     """根据用户画像生成约束指令注入 LLM prompt"""
     constraints = []
-
-    budget_tier = profile.get("budget_tier", "")
+    # 注意: profile 可能含值为 None 的键（记忆 JSON 宽松），一律 or 兜底
+    budget_tier = profile.get("budget_tier") or ""
     if budget_tier == "穷游":
         constraints.append("- 优先免费景点，预算 < 500 元/天")
-
-    diet = profile.get("diet", [])
+    diet = profile.get("diet") or []
     if any("不吃辣" in d for d in diet):
         constraints.append("- 避免川菜、湘菜等辣味菜系")
-
-    accommodation = profile.get("accommodation", "")
+    accommodation = profile.get("accommodation") or ""
     if "经济型" in accommodation:
         constraints.append("- 推荐经济型酒店，控制住宿预算")
-
-    pace = profile.get("pace", "")
+    pace = profile.get("pace") or ""
     if pace == "紧凑高效":
         constraints.append("- 每天至少 3 个景点，行程紧凑")
-
     if constraints:
         return "\n**画像约束指令（必须遵守）:**\n" + "\n".join(constraints) + "\n"
     return ""
@@ -370,7 +472,6 @@ def planner_node(state: TripPlannerState, config: dict | None = None) -> dict:
             if profile.get(k): parts.append(f"- {label}: {', '.join(profile[k])}")
         if parts: profile_description = "**用户画像:**\n" + "\n".join(parts)
 
-    # ── 画像指令注入 ──
     profile_constraints = _build_profile_constraints(profile)
 
     dates_str = ", ".join(date_list) if date_list else "请自行推断"
@@ -383,11 +484,19 @@ def planner_node(state: TripPlannerState, config: dict | None = None) -> dict:
                    f"{dist}km · 约{state.get('intercity_duration_h', 0)}h · "
                    f"¥{state.get('intercity_cost', 0)}\n")
 
-    # 重试时追加提示
     retry_hint = ""
     if retry_count > 0:
         retry_hint = (f"\n⚠️ 第{retry_count}次重试——上次生成的计划有硬伤，"
                       f"请务必修正以下问题并严格遵守约束！\n")
+
+    # ── 远郊一日游提示（业务语义：不删除，安排单独一天）──
+    excursion_hint = ""
+    excursions = state.get("excursion_pois", [])
+    if excursions:
+        names = "、".join(e["name"] for e in excursions)
+        excursion_hint = (
+            f"\n**远郊一日游:** 以下景点距市中心超过 80km，"
+            f"请安排为单独一日游（早出晚归，当天只去该方向景点）: {names}\n")
 
     query = f"""请根据以下信息生成{state['days']}天旅行计划:
 
@@ -410,13 +519,15 @@ def planner_node(state: TripPlannerState, config: dict | None = None) -> dict:
 
 用户偏好: {', '.join(prefs) if prefs else '无'}
 {profile_description}
-{profile_constraints}{retry_hint}
+{profile_constraints}{excursion_hint}{retry_hint}
 {('【注意】' + '; '.join(warnings) if warnings else '')}
 """
     try:
         planner = get_planner()
         result = planner._run_agent_with_retry(planner.planner_agent, query)
         plan = planner._parse_plan(result)
+        _ground_truth_coordinates(plan, state)
+        _enrich_meals(plan, city)
         validation = _validate_and_refine(state, plan)
     except Exception as exc:
         _emit(config, "planner", "done", {"status": "failed"})

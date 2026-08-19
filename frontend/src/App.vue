@@ -322,69 +322,67 @@ async function startPlan() {
   barGrown.value = false
   Object.keys(flowState).forEach(k => flowState[k] = 'pending')
 
-  const payload = {
+  const params = new URLSearchParams({
     user_id: userId,
     origin: form.origin,
     city: form.city,
     days: form.days,
     start_date: form.startDate,
     transport_mode: form.transportMode,
-    preferences: form.prefs,
-  }
-
-  const fetchPromise = fetch(`${API}/api/trip`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }).then(async r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`)
-    const data = await r.json()
-    if (data.intercity_transport) {
-      data.intercity = {
-        mode: data.intercity_transport.mode,
-        distance_km: data.intercity_transport.distance_km,
-        distance_category: data.intercity_transport.distance_category,
-        estimated_cost: data.intercity_transport.estimated_cost,
-        duration_hours: data.intercity_transport.duration_hours,
-      }
-    }
-    return data
+    preferences: form.prefs.join(','),
   })
 
-  flowState[nodeOrder[0]] = 'active'
-
-  let step = 1
-  const timer = setInterval(() => {
-    if (step > nodeOrder.length) {
-      clearInterval(timer)
-      return
-    }
-    flowState[nodeOrder[step - 1]] = 'done'
-    progressPct.value = progressSteps[step - 1]
-
-    if (step < nodeOrder.length) {
-      flowState[nodeOrder[step]] = 'active'
-    }
-    step++
-  }, 4000)
-
   try {
-    const data = await fetchPromise
-    clearInterval(timer)
-    nodeOrder.forEach(n => { flowState[n] = 'done' })
-    result.value = data
-    errors.value = data.errors || []
-    progressPct.value = 100
-    setTimeout(() => { planning.value = false }, 800)
-    // 结果卡片入场后再触发 budget bar 生长
-    setTimeout(() => { barGrown.value = true }, 1000)
-    loadProfile()
+    const resp = await fetch(`${API}/api/trip/stream?${params}`)
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`)
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const frames = buffer.split('\n\n')
+      buffer = frames.pop()  // 最后一个可能是半截，留下
+      for (const frame of frames) {
+        const line = frame.split('\n').find(l => l.startsWith('data: '))
+        if (!line) continue
+        let evt
+        try { evt = JSON.parse(line.slice(6)) } catch { continue }
+        handleStreamEvent(evt)
+      }
+    }
   } catch (err) {
-    clearInterval(timer)
     nodeOrder.forEach(n => { if (flowState[n] === 'active') flowState[n] = 'failed' })
     errors.value = ['请求失败: ' + err.message]
     planning.value = false
   }
+}
+
+function handleStreamEvent(evt) {
+  const { node, status, data } = evt
+  if (node === 'error' || node === 'cancelled') {
+    nodeOrder.forEach(n => { if (flowState[n] === 'active') flowState[n] = 'failed' })
+    errors.value.push(data?.message || `${node} 事件`)
+    planning.value = false
+    return
+  }
+  if (node === 'done' && status === 'complete') {
+    result.value = data
+    errors.value = data.errors || []
+    progressPct.value = 100
+    nodeOrder.forEach(n => { flowState[n] = 'done' })
+    setTimeout(() => { planning.value = false }, 800)
+    setTimeout(() => { barGrown.value = true }, 1000)
+    loadProfile()
+    return
+  }
+  // 节点进度事件：attraction / hotel / memory / planner
+  const idx = nodeOrder.indexOf(node)
+  if (idx < 0) return
+  flowState[node] = status === 'done' ? 'done' : (status === 'failed' ? 'failed' : 'active')
+  if (status === 'done' || status === 'failed') progressPct.value = progressSteps[idx]
 }
 
 async function loadProfile() { try { const r = await fetch(`${API}/api/profile?user_id=${encodeURIComponent(userId)}`); profile.value = await r.json() } catch {} }

@@ -412,12 +412,10 @@ class MemoryManager:
             self._entries.append(entry)
 
 
-# 全局单例
-_memory: MemoryManager | None = None
+# ================================================================
+# 持久化说明
+# ================================================================
+# 运行时主路径已迁移到 MemoryRepository（SQLite user_memory 表，租户隔离 + 事务）。
+# 本类的 JSON 文件读写仅保留给测试与快照恢复（from_snapshot），
+# 不再存在全局单例——避免并发写同一文件的无锁竞争。
 
-
-def get_memory() -> MemoryManager:
-    global _memory
-    if _memory is None:
-        _memory = MemoryManager()
-    return _memory

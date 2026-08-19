@@ -12,10 +12,12 @@
 
 ## Architecture
 
-- **4 Node 图 + fan-out/join 拓扑** (2026-07-26 更新): `START → [attraction, memory] → hotel → planner`
-  - `memory` 与 `attraction` 并行入口（memory 纯本地 JSON 读，不阻塞 LLM+MCP 长任务）
-  - `planner` 双入边 join：LangGraph 自动等 hotel + memory 都到达
+- **4 Node 图 + fan-out 拓扑** (2026-08-21 更新): `START → [attraction, memory] → hotel → planner`
+  - `attraction`/`hotel` 是确定性检索节点（`AmapToolWrapper.search_pois` 直连，无 LLM），只留 `planner` 一个 LLM 节点
+  - `memory` 与 `attraction` 并行入口（memory 纯本地 SQLite 读，不阻塞 LLM+MCP 长任务）
+  - **无 join 边**：LangGraph 1.2.9 跨 superstep fan-in 是"每条入边各触发一次"而非 join，planner 若挂两条入边会被执行两次（LLM 调用双倍，实测确认）。memory 结果经共享 state 传递，planner 只挂 hotel 单入边
   - 天气 + 城际交通已移入 API 层预处理（`_fetch_weather ∥ _compute_intercity` 也并发提交）
+- **结构化候选链路** (2026-08-21): `PoiCandidate`/`HotelCandidate` 字段化传递（坐标/来源/价格），不再经过 Markdown/📍 正则/LLM 转发；多偏好全量召回 + 稳定 ID 去重；远郊（>80km）标记 `excursion` 一日游不删除，酒店选址用市区质心（`urban_lng/lat`）；三餐由 `_enrich_meals` 用景点周边 500m 真实美食 POI 填充
 - **Thick Node 原则**: 每个 Node 独立完成「搜索 → 增强 → 计算」闭环，不是薄 API 转接头
   - 数据增强归 Node（Wrapper 接入 Agent 坐标增强）
   - 纯工程计算（城际交通、日期）放 API 层预处理

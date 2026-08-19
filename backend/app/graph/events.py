@@ -7,11 +7,10 @@
   emitter.emit("attraction", "done", {"count": 10})
 
 注意: 使用 queue.Queue（线程安全），避免 asyncio.Queue 跨线程通信问题。
+事件由 API 层轮询消费（get_nowait），SSE 格式在 trip.py 组装。
 """
 
-import json
 import queue
-from typing import AsyncGenerator
 
 
 class SSEEmitter:
@@ -31,13 +30,3 @@ class SSEEmitter:
 
     def empty(self) -> bool:
         return self._queue.empty()
-
-    async def stream(self) -> AsyncGenerator[str, None]:
-        """SSE generator — 持续 yield 事件（由调用方控制停止）"""
-        import asyncio
-        while True:
-            try:
-                event = self._queue.get(timeout=0.3)
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            except queue.Empty:
-                await asyncio.sleep(0)
