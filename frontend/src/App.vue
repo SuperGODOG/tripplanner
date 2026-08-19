@@ -170,6 +170,18 @@
 import { ref, reactive, computed, onMounted, watch, h, defineComponent } from 'vue'
 
 const API = 'http://localhost:8000'
+const USER_ID_STORAGE_KEY = "tripplanner.user_id"
+
+function getUserId() {
+  let userId = localStorage.getItem(USER_ID_STORAGE_KEY)
+  if (!userId) {
+    userId = crypto.randomUUID()
+    localStorage.setItem(USER_ID_STORAGE_KEY, userId)
+  }
+  return userId
+}
+
+const userId = getUserId()
 const form = reactive({ origin: '上海', city: '北京', startDate: '', days: 3, prefs: [], transportMode: '高铁' })
 const planning = ref(false), result = ref(null), errors = ref([]), progressPct = ref(0)
 const profile = ref({ ready: false, trip_count: 0 })
@@ -299,7 +311,7 @@ function popTag(e) {
 onMounted(async () => {
   const today = new Date();
   form.startDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  try { const r = await fetch(`${API}/api/profile`); profile.value = await r.json() } catch {}
+  try { const r = await fetch(`${API}/api/profile?user_id=${encodeURIComponent(userId)}`); profile.value = await r.json() } catch {}
 })
 
 const nodeOrder = ['attraction', 'hotel', 'memory', 'planner']
@@ -311,6 +323,7 @@ async function startPlan() {
   Object.keys(flowState).forEach(k => flowState[k] = 'pending')
 
   const payload = {
+    user_id: userId,
     origin: form.origin,
     city: form.city,
     days: form.days,
@@ -374,7 +387,7 @@ async function startPlan() {
   }
 }
 
-async function loadProfile() { try { const r = await fetch(`${API}/api/profile`); profile.value = await r.json() } catch {} }
+async function loadProfile() { try { const r = await fetch(`${API}/api/profile?user_id=${encodeURIComponent(userId)}`); profile.value = await r.json() } catch {} }
 
 const profileDims = computed(() => {
   const p = profile.value?.profile || {}

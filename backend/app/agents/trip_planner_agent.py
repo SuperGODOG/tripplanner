@@ -322,10 +322,14 @@ class MultiAgentTripPlanner:
         if "```json" in response:
             start = response.find("```json") + 7
             end = response.find("```", start)
+            if end == -1:
+                raise ValueError("JSON 代码围栏未闭合")
             return json.loads(response[start:end].strip())
         elif "```" in response and "{" in response:
             start = response.find("```") + 3
             end = response.find("```", start)
+            if end == -1:
+                raise ValueError("JSON 代码围栏未闭合")
             return json.loads(response[start:end].strip())
         elif "{" in response and "}" in response:
             start = response.find("{")

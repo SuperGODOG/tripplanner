@@ -1,18 +1,16 @@
 """LangGraph Node 函数 — 支持 SSE 进度事件"""
 from .state import TripPlannerState
+from .context import event_sink_from_config
 from ..agents.trip_planner_agent import get_planner
 
-_emitter = None
-
-def set_emitter(emitter):
-    global _emitter; _emitter = emitter
-
-def _emit(node, status, data=None):
-    if _emitter: _emitter.emit(node, status, data)
+def _emit(config: dict | None, node: str, status: str, data: dict | None = None) -> None:
+    sink = event_sink_from_config(config)
+    if sink:
+        sink.emit(node, status, data)
 
 
-def attraction_node(state: TripPlannerState) -> dict:
-    _emit("attraction", "start")
+def attraction_node(state: TripPlannerState, config: dict | None = None) -> dict:
+    _emit(config, "attraction", "start")
     city = state["city"]
     prefs = state.get("preferences", [])
     try:
@@ -48,7 +46,7 @@ def attraction_node(state: TripPlannerState) -> dict:
                 f"请搜索{city}的{kw}相关景点。\n"
                 f"[TOOL_CALL:amap_search:city={city},type=attraction,keywords={kw}]"
             )
-        _emit("attraction", "done", {"status": "success"})
+        _emit(config, "attraction", "done", {"status": "success"})
 
         # ── 计算景点群物理中心（本地 Python，不交 LLM）──
         import re
@@ -66,13 +64,13 @@ def attraction_node(state: TripPlannerState) -> dict:
 
         return {"attraction_data": result, "attraction_status": "success", **center}
     except Exception as e:
-        _emit("attraction", "done", {"status": "failed"})
+        _emit(config, "attraction", "done", {"status": "failed"})
         return {"attraction_data": "", "attraction_status": "failed",
                 "error_log": [f"景点搜索失败: {str(e)}"]}
 
 
-def hotel_node(state: TripPlannerState) -> dict:
-    _emit("hotel", "start")
+def hotel_node(state: TripPlannerState, config: dict | None = None) -> dict:
+    _emit(config, "hotel", "start")
     city = state["city"]
     try:
         planner = get_planner()
@@ -93,23 +91,23 @@ def hotel_node(state: TripPlannerState) -> dict:
             result = planner._run_agent_with_retry(planner.hotel_agent,
                 f"请搜索{city}的酒店。\n[TOOL_CALL:amap_search:city={city},type=hotel]"
             )
-        _emit("hotel", "done", {"status": "success"})
+        _emit(config, "hotel", "done", {"status": "success"})
         return {"hotel_data": result, "hotel_status": "success"}
     except Exception as e:
-        _emit("hotel", "done", {"status": "failed"})
+        _emit(config, "hotel", "done", {"status": "failed"})
         return {"hotel_data": "", "hotel_status": "failed",
                 "error_log": [f"酒店搜索失败: {str(e)}"]}
 
 
-def memory_node(state: TripPlannerState) -> dict:
-    _emit("memory", "start")
-    from ..memory.manager import get_memory
+def memory_node(state: TripPlannerState, config: dict | None = None) -> dict:
+    _emit(config, "memory", "start")
+    from ..memory.repository import get_memory_repository
     try:
-        profile = get_memory().get_profile()
-        _emit("memory", "done")
+        _, profile = get_memory_repository().get_profile(state["user_id"])
+        _emit(config, "memory", "done")
         return {"user_profile": profile}
     except Exception as e:
-        _emit("memory", "done", {"status": "failed"})
+        _emit(config, "memory", "done", {"status": "failed"})
         return {"error_log": [f"记忆加载失败: {str(e)}"]}
 
 
@@ -161,9 +159,12 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
         if f not in plan:
             hard_errors.append(f"缺少必填字段: {f}")
 
-    # 预算超 30%
+    # 预算约束
     budget = plan.get("budget", {})
     total = budget.get("total", 0) if isinstance(budget, dict) else 0
+    requested_budget = state.get("budget_total")
+    if requested_budget is not None and total > requested_budget:
+        hard_errors.append(f"预算 {total} 元 超出请求总预算 {requested_budget} 元")
     if profile.get("budget_range"):
         try:
             pref_hi = int(profile["budget_range"].split("-")[1].replace("元", ""))
@@ -345,8 +346,8 @@ def _build_profile_constraints(profile: dict) -> str:
     return ""
 
 
-def planner_node(state: TripPlannerState) -> dict:
-    _emit("planner", "start")
+def planner_node(state: TripPlannerState, config: dict | None = None) -> dict:
+    _emit(config, "planner", "start")
     city = state["city"]
     origin = state.get("origin", "")
     date_list = state.get("date_list", [])
@@ -395,6 +396,8 @@ def planner_node(state: TripPlannerState) -> dict:
 目的地: {city}
 日期: {date_req}
 天数: {state['days']}天
+每日可安排时间: {state.get("day_start_hour", 9)}:00-{state.get("day_end_hour", 20)}:00
+总预算硬约束: ¥{state.get("budget_total")}（未提供则不限制）
 
 景点信息:
 {state.get('attraction_data', '无')}
@@ -410,13 +413,22 @@ def planner_node(state: TripPlannerState) -> dict:
 {profile_constraints}{retry_hint}
 {('【注意】' + '; '.join(warnings) if warnings else '')}
 """
-    planner = get_planner()
-    result = planner._run_agent_with_retry(planner.planner_agent, query)
-    plan = planner._parse_plan(result)
+    try:
+        planner = get_planner()
+        result = planner._run_agent_with_retry(planner.planner_agent, query)
+        plan = planner._parse_plan(result)
+        validation = _validate_and_refine(state, plan)
+    except Exception as exc:
+        _emit(config, "planner", "done", {"status": "failed"})
+        return {
+            "final_plan": {
+                "city": city, "start_date": state.get("start_date", ""),
+                "days": [], "budget": {}, "overall_suggestions": "规划服务暂时不可用",
+                "status": "fallback",
+            },
+            "planner_route": "done",
+            "error_log": [f"行程规划失败: {exc}"],
+        }
 
-    # ── 本地校验/离群检测/画像指令注入 ──
-    validation = _validate_and_refine(state, plan)
-
-    _emit("planner", "done")
-
+    _emit(config, "planner", "done")
     return {"final_plan": plan, **validation}

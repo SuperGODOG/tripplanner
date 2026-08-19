@@ -98,25 +98,18 @@ def build_trip_graph() -> StateGraph:
     )
 
     # 6. 编译——生成可执行的图，使用 SQLite 持久化 Checkpoint
-    # builder.py 在 backend/app/graph/ 下，上溯 4 层到项目根，然后 data/
+    # builder.py 在 backend/app/graph/ 下，上溯 3 层到项目根，然后 data/
     _project_root = os.path.abspath(os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", ".."))
+        os.path.dirname(__file__), "..", "..", ".."))
     data_dir = os.path.join(_project_root, "data")
     os.makedirs(data_dir, exist_ok=True)
 
     # SQLite 连接：check_same_thread=False 因为 LangGraph 在不同线程读写 checkpoint
     db_path = os.path.join(data_dir, "checkpoints.db")
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
     checkpointer = SqliteSaver(conn)
 
     return graph.compile(checkpointer=checkpointer)
-# 全局单例
-_trip_graph = None
-
-
 def get_trip_graph():
-    """获取编译后的图实例（单例）"""
-    global _trip_graph
-    if _trip_graph is None:
-        _trip_graph = build_trip_graph()
-    return _trip_graph
+    """创建当前请求独享的图和 SQLite 连接，避免跨请求共享事务状态。"""
+    return build_trip_graph()

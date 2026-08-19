@@ -5,6 +5,10 @@ from operator import add
 
 class TripPlannerState(TypedDict, total=False):
     # ── 输入 ──
+    user_id: str
+    budget_total: int | None
+    day_start_hour: int
+    day_end_hour: int
     origin: str
     city: str
     days: int

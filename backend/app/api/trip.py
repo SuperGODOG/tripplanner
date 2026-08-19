@@ -2,28 +2,29 @@
 import json, re, traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
-from fastapi import APIRouter, HTTPException
+from uuid import UUID
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from ..models.schemas import TripRequest, TripPlan, IntercityTransport
 from ..graph.builder import get_trip_graph
-from ..memory.manager import get_memory
+from ..graph.context import RequestContext
+from ..memory.repository import get_memory_repository
 
 router = APIRouter(prefix="/api", tags=["trip"])
 
 
 @router.get("/profile")
-async def get_profile():
-    memory = get_memory()
-    profile = memory.get_profile()
-    return {"trip_count": memory.trip_count, "ready": memory.trip_count >= 5,
-            "profile": profile if memory.trip_count >= 5 else {}}
+async def get_profile(user_id: UUID):
+    trip_count, profile = get_memory_repository().get_profile(str(user_id))
+    return {"trip_count": trip_count, "ready": trip_count >= 5,
+            "profile": profile if trip_count >= 5 else {}}
 
 
 @router.post("/trip", response_model=TripPlan)
 async def plan_trip(request: TripRequest):
     try:
         graph = get_trip_graph()
-        memory = get_memory()
+        memory_repository = get_memory_repository()
 
         start = request.start_date or date.today().isoformat()
         date_list = [(date.fromisoformat(start) + timedelta(days=i)).isoformat() for i in range(request.days)]
@@ -36,23 +37,23 @@ async def plan_trip(request: TripRequest):
             intercity, ic_error = f_intercity.result() if f_intercity else (None, None)
             weather_data, weather_status, weather_error = f_weather.result()
 
-        # 写入记忆
-        memory.add(f"目的地: {request.city}", "observe")
+        observations = [f"目的地: {request.city}", f"出行方式: {request.transport_mode}"]
         if request.origin:
-            memory.add(f"出发地: {request.origin}", "observe")
-        memory.add(f"出行方式: {request.transport_mode}", "observe")
-        for pref in request.preferences:
-            memory.add(f"偏好: {pref}", "observe")
+            observations.append(f"出发地: {request.origin}")
+        observations.extend(f"偏好: {pref}" for pref in request.preferences)
         if intercity and intercity.distance_category:
-            memory.add(f"距离分类: {intercity.distance_category}", "observe")
-        memory.trip_count += 1
-        memory._save()
+            observations.append(f"距离分类: {intercity.distance_category}")
+        memory_repository.record_trip(str(request.user_id), observations)
 
         errors_init = [ic_error] if ic_error else []
         if weather_error:
             errors_init.append(weather_error)
 
         state = {
+            "user_id": str(request.user_id),
+            "budget_total": request.budget_total,
+            "day_start_hour": request.day_start_hour,
+            "day_end_hour": request.day_end_hour,
             "origin": request.origin,
             "city": request.city,
             "days": request.days,
@@ -70,7 +71,8 @@ async def plan_trip(request: TripRequest):
             "user_profile": {},
         }
 
-        config = {"configurable": {"thread_id": f"trip_{request.city}_{start}"}}
+        context = RequestContext.create(str(request.user_id))
+        config = context.checkpoint_config
         result = graph.invoke(state, config)
         plan_data = result.get("final_plan", {})
         errors = result.get("error_log", [])
@@ -94,7 +96,7 @@ async def plan_trip(request: TripRequest):
 
 @router.get("/trip/stream")
 async def plan_trip_stream(
-    city: str, days: int = 3,
+    city: str, user_id: UUID, days: int = Query(3, ge=1, le=14),
     origin: str = "", start_date: str = "",
     transport_mode: str = "高铁",
     preferences: str = "",  # comma-separated
@@ -102,7 +104,6 @@ async def plan_trip_stream(
     """SSE 流式端点——前端实时看到每个 Node 进度"""
     import json, asyncio, queue, threading
     from ..graph.events import SSEEmitter
-    from ..graph.nodes import set_emitter
 
     emitter = SSEEmitter()
 
@@ -119,19 +120,21 @@ async def plan_trip_stream(
                 intercity, ic_error = f_intercity.result() if f_intercity else (None, None)
                 weather_data, weather_status, weather_error = f_weather.result()
 
-            memory = get_memory()
-            memory.add(f"目的地: {city}", "observe")
-            if origin: memory.add(f"出发地: {origin}", "observe")
-            memory.add(f"出行方式: {transport_mode}", "observe")
-            for p in prefs: memory.add(f"偏好: {p}", "observe")
-            if intercity and intercity.distance_category: memory.add(f"距离分类: {intercity.distance_category}", "observe")
-            memory.trip_count += 1; memory._save()
+            observations = [f"目的地: {city}", f"出行方式: {transport_mode}"]
+            if origin:
+                observations.append(f"出发地: {origin}")
+            observations.extend(f"偏好: {pref}" for pref in prefs)
+            if intercity and intercity.distance_category:
+                observations.append(f"距离分类: {intercity.distance_category}")
+            get_memory_repository().record_trip(str(user_id), observations)
 
             errors_init = [ic_error] if ic_error else []
             if weather_error:
                 errors_init.append(weather_error)
 
             state = {
+                "user_id": str(user_id), "budget_total": None,
+                "day_start_hour": 9, "day_end_hour": 20,
                 "origin": origin, "city": city, "days": days,
                 "start_date": start, "date_list": date_list,
                 "transport_mode": transport_mode, "preferences": prefs,
@@ -147,10 +150,9 @@ async def plan_trip_stream(
             # 发送连接成功事件
             yield f"data: {json.dumps({'node': 'connected', 'status': 'ok', 'data': {}}, ensure_ascii=False)}\n\n"
 
-            set_emitter(emitter)
             graph = get_trip_graph()
-
-            config = {"configurable": {"thread_id": f"trip_{city}_{start}"}}
+            context = RequestContext.create(str(user_id), event_sink=emitter)
+            config = context.checkpoint_config
             cancel_event = threading.Event()
             result = None
 
@@ -193,7 +195,6 @@ async def plan_trip_stream(
                 cancel_event.set()
                 yield f"data: {json.dumps({'node': 'cancelled', 'status': 'cancelled', 'data': {}}, ensure_ascii=False)}\n\n"
                 return
-            set_emitter(None)
 
             # 最终结果
             plan_data = result.get("final_plan", {})

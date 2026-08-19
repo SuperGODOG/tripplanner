@@ -27,12 +27,40 @@ class MemoryManager:
     持久化: JSON 文件（data/memory.json）
     """
 
-    def __init__(self, storage_path: str = "data/memory.json", top_n: int = 30):
+    def __init__(self, storage_path: str | None = "data/memory.json", top_n: int = 30):
         self.storage_path = storage_path
         self.top_n = top_n
         self._entries: list[MemoryEntry] = []
         self.trip_count: int = 0       # 行程计数（画像需 >= 5 次才显示）
         self._load()
+
+    @classmethod
+    def from_snapshot(cls, snapshot: dict) -> "MemoryManager":
+        manager = cls(storage_path=None)
+        manager.trip_count = snapshot.get("trip_count", 0)
+        for item in snapshot.get("entries", []):
+            manager._entries.append(MemoryEntry(
+                content=item["content"], category=item["category"],
+                tags=item.get("tags", []), domain_weight=item.get("domain_weight", 1.0),
+                decay_weight=item.get("decay_weight", 1.0),
+                interaction_weight=item.get("interaction_weight", 1.0),
+                frequency_boost=item.get("frequency_boost", 1.0),
+                outlier_penalty=item.get("outlier_penalty", 1.0),
+                created_at=item.get("created_at", ""), last_seen_at=item.get("last_seen_at", ""),
+            ))
+        return manager
+
+    def snapshot(self) -> dict:
+        return {
+            "trip_count": self.trip_count,
+            "entries": [{
+                "content": e.content, "category": e.category, "tags": e.tags,
+                "domain_weight": e.domain_weight, "decay_weight": e.decay_weight,
+                "interaction_weight": e.interaction_weight, "frequency_boost": e.frequency_boost,
+                "outlier_penalty": e.outlier_penalty, "final_weight": e.final_weight,
+                "created_at": e.created_at, "last_seen_at": e.last_seen_at,
+            } for e in self._entries],
+        }
 
     # ================================================================
     # 公共接口
@@ -332,6 +360,8 @@ class MemoryManager:
 
     def _save(self):
         """持久化到 JSON"""
+        if self.storage_path is None:
+            return
         os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
         data = []
         for e in self._entries:
@@ -353,6 +383,8 @@ class MemoryManager:
 
     def _load(self):
         """从 JSON 恢复"""
+        if self.storage_path is None:
+            return
         if not os.path.exists(self.storage_path):
             return
         with open(self.storage_path, "r", encoding="utf-8") as f:
