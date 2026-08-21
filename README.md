@@ -1,75 +1,117 @@
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/FastAPI-0.139-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"/>
+  <img src="https://img.shields.io/badge/LangGraph-1.2-1C3C3C?style=flat-square&logo=langchain&logoColor=white" alt="LangGraph"/>
+  <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue3"/>
+  <img src="https://img.shields.io/badge/tests-50%20passed-2ea44f?style=flat-square" alt="tests"/>
+</p>
+
 # 🧳 TripPlanner
 
-> 多日旅行规划 AI Agent — 确定性优先 + LLM 最小职责的分日并行架构
+> **多日旅行规划 AI Agent** —— 确定性优先 · LLM 最小职责 · 数据层互斥
 
-基于 LangGraph 自研图编排的多日旅行规划系统。输入出发地 + 目的地 + 天数 + 偏好，输出完整行程（景点/顺序/时间/酒店/三餐/预算/天气），行程计划端到端可观测、可降级。
+输入 `出发地 + 目的地 + 天数 + 偏好`，输出**完整行程**：景点顺序、到离时间、全程酒店、真实三餐、预算与天气。规划过程真 SSE 流式可见，每一步降级透明。
 
-**v3 核心设计**：景点互斥由数据层保证（K-Means 聚簇分天），路径顺序本地求解（贪心 + 2-opt + 时间窗），全程酒店目标函数选址（minimax 通勤），LLM 职责收缩到"每天一段文案"。
+---
 
-## 架构（v3：动态分日并发）
+## 🏗️ 架构总览
 
+```mermaid
+flowchart TB
+    subgraph PRE["API 预处理层（不占图节点）"]
+        W["天气查询"] --- I["城际交通"]
+    end
+
+    subgraph G["LangGraph 图 · v3 分日并发"]
+        A["attraction_node<br/>高德检索 · 稳定ID去重<br/>K-Means 聚簇分天"] --> H["hotel_node<br/>城市中心 10km 检索<br/>minimax 通勤选址"]
+        M["memory_node<br/>SQLite 租户画像<br/>（与 attraction 并行）"]
+        H --> F["_fan_out<br/>Send API × days<br/>动态分日 fan-out"]
+        F --> D1["day_node ①<br/>路径求解 + 文案 LLM"]
+        F --> D2["day_node ②<br/>路径求解 + 文案 LLM"]
+        F --> D3["day_node ⋯"]
+        D1 --> MG["merge_node<br/>聚合 · 天气解析 · 三餐<br/>预算 · 校验"]
+        D2 --> MG
+        D3 --> MG
+    end
+
+    A -.->|"共享 state"| F
+    M -.->|"user_profile"| F
+    MG --> OUT["final_plan"]
 ```
-START → [attraction, memory]（并行）→ hotel → Send fan-out × days
-      → day_node × N（并行）→ merge_node → END
-```
 
-| 层 | 职责 |
-|----|------|
-| API 预处理 | 天气 / 城际交通 / 日期计算（不占图节点） |
-| 确定性检索 | 高德 MCP 直连：景点多偏好召回 + 稳定 ID 去重 + 远郊标记 |
-| 聚类分天 | 手写 K-Means（k-means++ 初始化）：每个 POI 只属于一天，跨天重复在结构上不可能发生；景点不足自动生成自由活动日 |
-| 路径求解 | 贪心最近邻 + 2-opt + 时间窗硬检查（Haversine × 绕路系数，零 API 调用） |
-| 酒店选址 | minimax 通勤打分（替代几何质心），远郊排除 + 住宿偏好过滤 |
-| 分日并发 | LangGraph Send API 按 days 参数运行时 fan-out，N 天并行时延 ≈ 单天 |
-| LLM 文案 | 每天一次（JSON mode），只写 description/transportation/tips；失败本地模板兜底 |
-| 聚合 | 天气正则解析 / 三餐真实 POI / 本地预算 / 校验 → final_plan |
+### 关键设计
 
-**韧性**：SQLite checkpoint 断点续传、LLM 指数退避、SSE 断开取消、MCP 超时保护、全链路 error_log 降级透明（计划永不中断）。
+| | 设计 | 说明 |
+|---|------|------|
+| 🔒 | **数据层互斥** | K-Means 聚簇分天，每个 POI 只属一天——跨天重复在结构上不可能发生，LLM 不再做全局去重推理 |
+| ⚡ | **动态并行** | Send API 按 `days` 运行时 fan-out N 个并行 day 节点，实测 4 路并行时延 ≈ 单路 |
+| 🧭 | **路径本地求解** | 贪心最近邻 + 2-opt + 时间窗硬检查（Haversine × 绕路系数），零 API 调用；≤8 节点按规模选型不上求解器 |
+| 🏨 | **目标函数选址** | 全程酒店按 minimax 通勤距离对真实候选打分（替代几何质心——离群敏感且无业务语义） |
+| ✍️ | **LLM 最小职责** | 每天一次文案调用（JSON mode），只写 description/tips；失败本地模板兜底，计划永不中断 |
+| 🧠 | **记忆统计信号** | SQLite 租户隔离 + 频率加成 / IQR 异常检测，画像渐进构建（≥5 次行程才启用） |
+| 🛡️ | **韧性** | SQLite checkpoint 断点续传 · LLM 指数退避 · SSE 断开取消 · MCP 超时 · 全局并发闸(10) 防 QPS 打爆 |
 
-**记忆**：SQLite 租户隔离 + 频率加成 / IQR 异常检测的画像渐进构建（≥5 次行程才启用）。
+---
 
-## 快速启动
+## 🚀 快速启动
 
 ```bash
+# 1. 后端环境
 cd backend
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# API Key（高德 + DeepSeek）
+# 2. API Key（高德地图 + DeepSeek）
 cp .env.example venv/.env && nano venv/.env
 
-# 后端 :8000 + 前端 :5173
+# 3. 一键启动（后端 :8000 + 前端 :5173）
 cd .. && bash start.sh
 ```
 
-前端：`http://localhost:5173`（POST/SSE 双路径，默认真 SSE 流式）
+打开 <http://localhost:5173>，输入城市与偏好即可体验。
 
-## 测试
+---
+
+## 🧪 测试
 
 ```bash
 cd backend && ./venv/bin/python -m pytest tests -q
-# 50 用例，无网络无 LLM（Fake 组件注入），基线一次捕获 5 个真实 bug
 ```
 
-## 项目结构
+**50 个用例 · 无网络 · 无 LLM**（Fake 组件注入：FakeAmapWrapper / FakePlanner / FakeRepository）。
+测试基线一次捕获过 5 个真实 bug：LangGraph fan-in 双触发、MCP 工具名错误、POI 无坐标、
+画像 None 击穿、LLM 幻觉坐标（偏差 1300km）。
+
+---
+
+## 📁 项目结构
 
 ```
 backend/
-  app/
-    api/trip.py           # POST /api/trip + GET /api/trip/stream（真 SSE）
-    graph/                # LangGraph 图：builder / nodes / state / context
-    services/             # clustering（K-Means 分天）/ route_solver（路径）/ amap_service（MCP 池+缓存）/ llm_service
-    tools/amap_wrapper.py # 高德 MCP 包装器（结构化候选 + 坐标增强）
-    memory/               # 记忆：分类器 / 管理器 / SQLite 仓库
-    agents/               # day_agent（单天文案，JSON mode）
-  tests/                  # 50 用例（conftest 全 Fake 注入）
-frontend/                 # Vue 3 单文件（SSE 流式进度 + 降级面板）
+├── app/
+│   ├── api/trip.py            # POST /api/trip + GET /api/trip/stream（真 SSE）
+│   ├── graph/                 # LangGraph：builder / nodes / state / context / events
+│   ├── services/
+│   │   ├── clustering.py      # 手写 K-Means（k-means++）聚簇分天
+│   │   ├── route_solver.py    # 贪心最近邻 + 2-opt + 时间窗
+│   │   ├── amap_service.py    # 全局 MCP 并发闸 + geo 缓存(LRU)
+│   │   └── llm_service.py     # DeepSeek 封装 + 指数退避
+│   ├── tools/amap_wrapper.py  # 高德 MCP 包装（结构化候选 + 坐标增强）
+│   ├── memory/                # 分类器 / MemoryManager / SQLite 仓库
+│   └── agents/                # day_agent（单天文案，JSON mode）
+├── tests/                     # 50 用例（全 Fake 注入）
+└── data/                      # 运行时数据（gitignored）
+frontend/                      # Vue 3 单文件 · SSE 流式进度 · 降级面板
 ```
 
-## 版本演进（面试叙事）
+---
 
-- **v1**（master）：ReAct 内循环，4 感知 Agent 共享 MCP 工具
-- **v2**（preview）：attraction/hotel 改确定性检索节点，LLM 调用 3→1 次/请求
-- **v3**（preview）：分日并行（Send fan-out）+ 数据层互斥 + 路径/选址本地化，LLM 只剩文案
+## 📈 版本演进
 
-git log 的迭代提交就是完整证据：`isolate requests → 结构化候选链路 → 分日并发重构`。
+| 版本 | 架构 | LLM 调用 |
+|------|------|----------|
+| **v1**（master） | ReAct 内循环，4 感知 Agent 共享 MCP | 3 次/请求 |
+| **v2**（preview） | attraction/hotel 改确定性检索节点 | 1 次/请求 |
+| **v3**（preview） | Send 分日并行 + 数据层互斥 + 路径/选址本地化 | N 次文案/请求（并行，时延 ≈ 1 次） |
+
+git log 的迭代提交就是完整演进证据：`isolate requests → 结构化候选链路 → 分日并发重构`。

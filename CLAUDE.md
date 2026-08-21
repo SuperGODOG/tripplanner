@@ -12,19 +12,22 @@
 
 ## Architecture
 
-- **4 Node 图 + fan-out 拓扑** (2026-08-21 更新): `START → [attraction, memory] → hotel → planner`
-  - `attraction`/`hotel` 是确定性检索节点（`AmapToolWrapper.search_pois` 直连，无 LLM），只留 `planner` 一个 LLM 节点
-  - `memory` 与 `attraction` 并行入口（memory 纯本地 SQLite 读，不阻塞 LLM+MCP 长任务）
-  - **无 join 边**：LangGraph 1.2.9 跨 superstep fan-in 是"每条入边各触发一次"而非 join，planner 若挂两条入边会被执行两次（LLM 调用双倍，实测确认）。memory 结果经共享 state 传递，planner 只挂 hotel 单入边
-  - 天气 + 城际交通已移入 API 层预处理（`_fetch_weather ∥ _compute_intercity` 也并发提交）
-- **结构化候选链路** (2026-08-21): `PoiCandidate`/`HotelCandidate` 字段化传递（坐标/来源/价格），不再经过 Markdown/📍 正则/LLM 转发；多偏好全量召回 + 稳定 ID 去重；远郊（>80km）标记 `excursion` 一日游不删除，酒店选址用市区质心（`urban_lng/lat`）；三餐由 `_enrich_meals` 用景点周边 500m 真实美食 POI 填充
+- **v3 分日并发拓扑** (2026-08-21): `START → [attraction, memory] → hotel → _fan_out(Send×days) → day_node × N → merge_node → END`
+  - 全图**无回环**（v2 retry_planner 已删）——景点集合/顺序/预算全部本地确定，硬伤在结构上不可能由 LLM 引入
+  - `attraction`/`hotel` 确定性检索节点（`AmapToolWrapper.search_pois` 直连，无 LLM）；`attraction` 检索后 **K-Means 聚簇分天**（`services/clustering.py`，每 POI 只属一天，跨天重复结构上不可能；远郊日/自由活动日边界）
+  - `_fan_out` 用 **Send API** 按 days 运行时 fan-out（`langgraph.types.Send`）；**Send 分支 state 只含 payload**——共享上下文必须显式注入；多分支汇聚到 merge_node **只触发 1 次**（与跨 superstep fan-in 双触发是不同语义，实测确认）
+  - `day_node`：本地路径求解（`services/route_solver.py` 贪心+2-opt+时间窗，Haversine×1.4）+ 单天文案 LLM（JSON mode，失败本地模板兜底，leisure 天零 LLM）
+  - `merge_node`：聚合 + 天气正则解析 + 全程酒店 + 三餐真实 POI + 本地预算 + 校验
+  - 酒店：**城市中心 geocode 搜索（10km）+ minimax 通勤选址**（`_select_hotel`，替代几何质心——center_*/urban_* 字段已删）
+  - 记忆纯本地 SQLite 读（ms 级），与 attraction 并行；memory 结果经共享 state 传递（无 join 边）
+- **全局 MCP 并发闸**: `amap_service.get_mcp_executor()` 单例池 max_workers=10，所有高德调用统一经 `run_mcp()`（只提交叶子任务，防死锁）；`geo_cached` LRU(256) 三处共用
+- **结构化候选链路** (2026-08-21): `PoiCandidate`/`HotelCandidate` 字段化传递（坐标/来源/价格），不再经过 Markdown/📍 正则/LLM 转发；多偏好全量召回 + 稳定 ID 去重；远郊（>80km）标记 `excursion` 一日游不删除；三餐由 `_enrich_meals` 用景点周边 500m 真实美食 POI 填充
 - **Thick Node 原则**: 每个 Node 独立完成「搜索 → 增强 → 计算」闭环，不是薄 API 转接头
   - 数据增强归 Node（Wrapper 接入 Agent 坐标增强）
   - 纯工程计算（城际交通、日期）放 API 层预处理
-- **无锁并发**: `MCPTool.run()` 每次调用内部新建独立 event loop + MCPClient 连接，无共享 mutable state；`error_log: Annotated[list, add]` reducer 自动合并 —— 三处并发（API 层双任务 / maps_geo 双查 / 图内 fan-out）均无需应用层 Lock
-- **离群检测**: 标准差法 1.5σ + 80km 硬上限
-- **酒店回环检测**: ≤2 次
-- **前端**: POST 替代 SSE；Vue 3 单文件，无 UI/动画库依赖
+- **无锁并发**: `MCPTool.run()` 每次调用内部新建独立 event loop + MCPClient 连接，无共享 mutable state；`error_log: Annotated[list, add]` reducer 自动合并 —— 并发均无需应用层 Lock
+- **断点续传**: SqliteSaver 持久化 `data/checkpoints.db`（`open_trip_graph()` 返回 (graph, conn)，调用方 finally 必须 conn.close()）；thread_id 由 RequestContext 每次生成 uuid4——机制在但请求间不可续传（已知缺口）
+- **前端**: POST 替代 SSE 的历史已废弃（真 SSE 流式）；Vue 3 单文件，无 UI/动画库依赖
 
 ## Branch Workflow
 
