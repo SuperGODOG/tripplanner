@@ -1,0 +1,36 @@
+site_name: Tripplanner · SuperGODOG
+site_description: 基于 LangGraph + ReAct 自研编排的多智能体旅行规划系统 | 5 Node StateGraph · MCP · 五因子权重 · 双轨异常检测
+site_url: https://supergodog.github.io/tripplanner/
+repo_url: https://github.com/SuperGODOG/tripplanner
+repo_name: tripplanner
+edit_uri: blob/main/
+
+docs_dir: site_src
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - toc.follow
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+
+plugins:
+  - search:
+      lang:
+        - zh
+        - en
+
+copyright: Copyright &copy; 2026 SuperGODOG
