@@ -5,7 +5,8 @@ backend/venv/
 backend/data/
 
 # 运行时数据（checkpoint / 记忆，根目录由 builder.py 生成）
-data/
+# 注意: 必须锚定 /data/——无锚定的 data/ 会匹配 backend/app/data/（攻略知识库静态资产）
+/data/
 
 # Python
 __pycache__/
