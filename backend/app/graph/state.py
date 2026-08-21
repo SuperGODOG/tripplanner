@@ -32,16 +32,23 @@ class TripPlannerState(TypedDict, total=False):
     weather_data: str
     hotel_data: str
 
-    # ── 空间计算（attraction_node 产出）──
-    center_lng: float                # 全部候选质心经度
-    center_lat: float                # 全部候选质心纬度
-    urban_lng: float                 # 市区质心经度（去远郊，酒店选址用）
-    urban_lat: float                 # 市区质心纬度
+    # ── 空间数据（attraction_node 产出）──
+    # 注: v3 已删 center_*/urban_* 质心字段——酒店选址改用目标函数（minimax），
+    #     质心离群敏感且无业务语义（2026-08-21）
     attraction_coords: list          # [{name, lng, lat}, ...]
     excursion_pois: list             # [{name, dist_km}, ...] 远郊一日游标记
 
+    # ── v3 分日并发（2026-08-21）──
+    day_clusters: list               # [{"day_index", "kind", "pois": [...]}, ...] 聚类分配结果
+    plan_days: Annotated[list, add]  # 各 day_node 并行产出的单天计划（reducer 聚合）
+    day_pois: list                   # 当前 day_node 的簇 POI（Send payload 注入）
+    day_kind: str                    # 当前 day_node 的天类型: normal/excursion/leisure
+    day_date: str                    # 当前 day_node 的日期（Send payload 注入）
+    hotel_selected: dict             # 本地选定的全程酒店（merge_node 填充用）
+
     # ── 重试计数器 ──
     planner_retry_count: int         # Planner 自回环计数
+    planner_last_error: str          # 上一轮解析失败原因（重试 prompt 用，硬伤重试时清空）
 
     # ── 状态标记 ──
     attraction_status: str

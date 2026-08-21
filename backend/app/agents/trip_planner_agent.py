@@ -94,6 +94,22 @@ PLANNER_AGENT_PROMPT = """你是行程规划专家。你的任务是根据系统
 """
 
 
+DAY_AGENT_PROMPT = """你是行程规划专家。你的任务是为旅行计划中的【单天】撰写当天文案。
+
+**你的职责边界（重要）:**
+- 景点集合、游览顺序、到达/离开时间、酒店、预算 已由系统确定性计算，你【不要】修改或重复输出它们
+- 你只负责撰写 4 段文案: description / transportation / accommodation / overall_tips
+
+**必须遵守:**
+1. description: 第N天行程概述，概述当天游玩主题，80 字以内
+2. transportation: 市内交通建议，结合景点分布给出，50 字以内
+3. accommodation: 住宿说明（结合用户住宿偏好），30 字以内
+4. overall_tips: 当天贴心建议（防晒/预约/餐饮等），50 字以内
+5. 天气恶劣（暴雨/大雪/台风）时在 overall_tips 中提醒备选室内方案
+6. 只输出 JSON 对象，不要输出任何其他文字
+"""
+
+
 # ============================================================
 # Planner 单例封装
 # ============================================================
@@ -121,12 +137,21 @@ class MultiAgentTripPlanner:
             llm=self.llm,
             system_prompt=PLANNER_AGENT_PROMPT,
         )
-        print("✅ 行程规划器初始化完成（planner_agent，无工具，纯推理）")
+        self.day_agent = SimpleAgent(
+            name="单日规划师",
+            llm=self.llm,
+            system_prompt=DAY_AGENT_PROMPT,
+        )
+        print("✅ 行程规划器初始化完成（planner_agent + day_agent，无工具，纯推理）")
 
-    def _run_agent_with_retry(self, agent, prompt: str, max_retries=3) -> str:
-        """带指数退避重试的 agent.run() 包装，处理 LLM API 临时故障。"""
+    def _run_agent_with_retry(self, agent, prompt: str, max_retries=3, **kwargs) -> str:
+        """带指数退避重试的 agent.run() 包装，处理 LLM API 临时故障。
+
+        **kwargs（如 response_format={"type": "json_object"}）透传给
+        SimpleAgent.run → llm.invoke → chat.completions.create。
+        """
         return retry_with_backoff(
-            lambda: agent.run(prompt),
+            lambda: agent.run(prompt, **kwargs),
             max_retries=max_retries,
         )
 

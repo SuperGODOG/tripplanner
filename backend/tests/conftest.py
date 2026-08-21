@@ -33,7 +33,8 @@ class FakeAmapWrapper:
     def search_pois(self, city, stype, keywords="", center="", radius="",
                     max_results=10):
         self.calls.append((stype, keywords, center, radius))
-        if stype == "hotel":
+        # v3: hotel_node 走 around+"酒店" 关键词（stype 区分不了酒店），必须返回 hotels
+        if stype == "hotel" or (stype == "around" and "酒店" in keywords):
             return list(self.hotels[:max_results])
         if stype == "food":
             return list(self.foods[:max_results])
@@ -47,13 +48,15 @@ class FakePlanner:
         self.response = response
         self.prompts: list[str] = []
         self.planner_agent = types.SimpleNamespace(run=self._run)
+        self.day_agent = types.SimpleNamespace(run=self._run)  # v3: 单天文案 agent
 
-    def _run(self, prompt: str) -> str:
+    def _run(self, prompt: str, **kwargs) -> str:
         self.prompts.append(prompt)
+        self.last_kwargs = kwargs  # 2026-08-21: 记录透传参数（验证 response_format）
         return self.response
 
-    def _run_agent_with_retry(self, agent, prompt: str, max_retries=3) -> str:
-        return agent.run(prompt)
+    def _run_agent_with_retry(self, agent, prompt: str, max_retries=3, **kwargs) -> str:
+        return agent.run(prompt, **kwargs)
 
     def _parse_plan(self, response: str) -> dict:
         from app.agents.trip_planner_agent import MultiAgentTripPlanner
@@ -82,9 +85,10 @@ def make_poi(name, lng, lat, district="", category="", price=None):
                         category=category, price=price)
 
 
-def make_hotel(name, lng, lat, rating="4.5", price_range="300-500元"):
+def make_hotel(name, lng, lat, rating="4.5", price_range="300-500元",
+               hotel_type="舒适型"):
     return HotelCandidate(name=name, lng=lng, lat=lat, rating=rating,
-                          price_range=price_range)
+                          price_range=price_range, hotel_type=hotel_type)
 
 
 def make_plan_response(days=2, budget_total=1000, attractions_per_day=2,
@@ -178,12 +182,11 @@ def base_state(city="北京", days=2, prefs=None, budget=None):
         "day_start_hour": 9, "day_end_hour": 20,
         "intercity_distance_km": 1200, "intercity_duration_h": 4.5,
         "intercity_cost": 553, "distance_category": "长途",
-        "attraction_data": "", "weather_data": "【天气信息】\n- 北京: 晴",
+        "attraction_data": "", "weather_data": "【天气信息】\n- 2026-08-21: 晴转多云, 25°C~15°C, 南风\n- 2026-08-22: 多云, 26°C~16°C, 南风",
         "hotel_data": "",
-        "center_lng": 0, "center_lat": 0,
         "attraction_coords": [],
         "attraction_candidates": [], "hotel_candidates": [],
-        "urban_lng": 0, "urban_lat": 0, "excursion_pois": [],
+        "excursion_pois": [],
         "attraction_status": "", "weather_status": "success", "hotel_status": "",
         "final_plan": {}, "error_log": [], "user_profile": {},
     }

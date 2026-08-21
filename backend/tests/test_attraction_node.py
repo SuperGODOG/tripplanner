@@ -52,9 +52,12 @@ def test_far_poi_marked_excursion_not_deleted(patch_nodes):
     names = [c["name"] for c in result["attraction_candidates"]]
     assert "长城" in names                      # 不删除
     assert "长城" in [e["name"] for e in result["excursion_pois"]]   # 标记远郊
-    # 市区质心只由市区点计算
-    urban_lng = result["urban_lng"]
-    assert urban_lng < 116.5 and urban_lng > 116.3
+    # v3: 远郊点不进市区聚类簇（聚类只吃市区点，远郊单独成远郊日——重复入簇回归）
+    normal_names = [p["name"] for c in result["day_clusters"]
+                    if c["kind"] == "normal" for p in c["pois"]]
+    assert "长城" not in normal_names
+    exc_clusters = [c for c in result["day_clusters"] if c["kind"] == "excursion"]
+    assert exc_clusters and any(p["name"] == "长城" for p in exc_clusters[0]["pois"])
 
 
 def test_excursion_distance_in_state(patch_nodes):
