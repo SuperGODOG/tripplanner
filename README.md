@@ -1,302 +1,75 @@
 # 🧳 TripPlanner
 
-> 基于 LangGraph + ReAct 自研编排的多智能体旅行规划系统
-> 4 Node StateGraph · MCP 协议 · 五因子权重记忆 · 双轨异常检测
+> 多日旅行规划 AI Agent — 确定性优先 + LLM 最小职责的分日并行架构
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://python.org)
-[![LangGraph](https://img.shields.io/badge/LangGraph-1.2-purple)](https://langchain-ai.github.io/langgraph/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.139-green)](https://fastapi.tiangolo.com/)
+基于 LangGraph 自研图编排的多日旅行规划系统。输入出发地 + 目的地 + 天数 + 偏好，输出完整行程（景点/顺序/时间/酒店/三餐/预算/天气），行程计划端到端可观测、可降级。
 
-输入出发地 + 目的地 + 偏好 → 3 个 Agent 协作生成完整旅行计划（景点/酒店/预算），天气+城际交通在 API 层预处理，景点离群检测自动过滤远郊景点，用户画像随使用次数渐进构建。
+**v3 核心设计**：景点互斥由数据层保证（K-Means 聚簇分天），路径顺序本地求解（贪心 + 2-opt + 时间窗），全程酒店目标函数选址（minimax 通勤），LLM 职责收缩到"每天一段文案"。
 
----
+## 架构（v3：动态分日并发）
 
-## 🚀 快速部署
-
-### 1. 克隆项目
-
-```bash
-git clone https://github.com/你的用户名/tripplanner.git
-cd tripplanner/backend
+```
+START → [attraction, memory]（并行）→ hotel → Send fan-out × days
+      → day_node × N（并行）→ merge_node → END
 ```
 
-### 2. 创建虚拟环境
+| 层 | 职责 |
+|----|------|
+| API 预处理 | 天气 / 城际交通 / 日期计算（不占图节点） |
+| 确定性检索 | 高德 MCP 直连：景点多偏好召回 + 稳定 ID 去重 + 远郊标记 |
+| 聚类分天 | 手写 K-Means（k-means++ 初始化）：每个 POI 只属于一天，跨天重复在结构上不可能发生；景点不足自动生成自由活动日 |
+| 路径求解 | 贪心最近邻 + 2-opt + 时间窗硬检查（Haversine × 绕路系数，零 API 调用） |
+| 酒店选址 | minimax 通勤打分（替代几何质心），远郊排除 + 住宿偏好过滤 |
+| 分日并发 | LangGraph Send API 按 days 参数运行时 fan-out，N 天并行时延 ≈ 单天 |
+| LLM 文案 | 每天一次（JSON mode），只写 description/transportation/tips；失败本地模板兜底 |
+| 聚合 | 天气正则解析 / 三餐真实 POI / 本地预算 / 校验 → final_plan |
+
+**韧性**：SQLite checkpoint 断点续传、LLM 指数退避、SSE 断开取消、MCP 超时保护、全链路 error_log 降级透明（计划永不中断）。
+
+**记忆**：SQLite 租户隔离 + 频率加成 / IQR 异常检测的画像渐进构建（≥5 次行程才启用）。
+
+## 快速启动
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate       # Linux/macOS
-# venv\Scripts\activate        # Windows
-```
-
-### 3. 配置 API Key
-
-```bash
-cp .env.example venv/.env
-nano venv/.env
-```
-
-填入你的 Key：
-
-```ini
-LLM_API_KEY=sk-your-deepseek-key
-LLM_MODEL_ID=deepseek-chat
-LLM_BASE_URL=https://api.deepseek.com/v1
-AMAP_API_KEY=your-amap-web-service-key
-```
-
-> **高德 Key 申请**：https://console.amap.com/dev/key/app → 选择「Web 服务」类型
->
-> **DeepSeek Key 申请**：https://platform.deepseek.com/api_keys
-
-### 4. 安装依赖并启动
-
-```bash
-# 配置国内镜像加速（可选）
-pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-
+cd backend
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-python run.py
+
+# API Key（高德 + DeepSeek）
+cp .env.example venv/.env && nano venv/.env
+
+# 后端 :8000 + 前端 :5173
+cd .. && bash start.sh
 ```
 
-浏览器打开：
-- **前端界面**：http://localhost:8000/app/
-- **API 文档**：http://localhost:8000/docs
+前端：`http://localhost:5173`（POST/SSE 双路径，默认真 SSE 流式）
 
-### 5. 启动 / 关闭
+## 测试
 
 ```bash
-# 启动（前台，Ctrl+C 关闭）
-cd backend && source venv/bin/activate && python run.py
-
-# 后台启动
-nohup python run.py > server.log 2>&1 &
-
-# 关闭
-kill $(lsof -ti:8000)
+cd backend && ./venv/bin/python -m pytest tests -q
+# 50 用例，无网络无 LLM（Fake 组件注入），基线一次捕获 5 个真实 bug
 ```
 
----
-
-## 🗑 重置记忆模块
-
-记忆数据存储在 `data/memory.json`，包含用户画像和行程计数。
-
-```bash
-# 完全重置（画像归零）
-rm -f backend/data/memory.json
-
-# 或只清空行程计数（保留偏好标签）
-python -c "
-from app.memory.manager import get_memory
-m = get_memory()
-m.trip_count = 0
-m._save()
-print('行程计数已重置')
-"
-```
-
-画像构建需要至少 5 次行程。重置后前端显示 `0 / 5 — 正在构建画像...`。
-
----
-
-## 🏗 架构设计
-
-### 分层架构
+## 项目结构
 
 ```
-第 5 层  多智能体编排     ← 4 Node LangGraph + Conditional Edge
-第 4 层  图编排框架       ← StateGraph / Edge / Conditional / Checkpoint
-第 3 层  框架封装         ← HelloAgents SimpleAgent
-第 2 层  Agent 内循环     ← ReAct (Error-as-Observation)
-第 1 层  裸 LLM 调用      ← DeepSeek API
-第 0 层  API 预处理       ← 日期计算 / 天气查询 / 城际交通 / 记忆写入
+backend/
+  app/
+    api/trip.py           # POST /api/trip + GET /api/trip/stream（真 SSE）
+    graph/                # LangGraph 图：builder / nodes / state / context
+    services/             # clustering（K-Means 分天）/ route_solver（路径）/ amap_service（MCP 池+缓存）/ llm_service
+    tools/amap_wrapper.py # 高德 MCP 包装器（结构化候选 + 坐标增强）
+    memory/               # 记忆：分类器 / 管理器 / SQLite 仓库
+    agents/               # day_agent（单天文案，JSON mode）
+  tests/                  # 50 用例（conftest 全 Fake 注入）
+frontend/                 # Vue 3 单文件（SSE 流式进度 + 降级面板）
 ```
 
-### 数据流向
+## 版本演进（面试叙事）
 
-```
-POST /api/trip
-  │
-  ├─ API 预处理层
-  │   ├─ 日期列表本地计算（Python，不交 LLM）
-  │   ├─ 天气查询（maps_weather 直接调用）
-  │   ├─ 城际交通（maps_geo → maps_distance → 费用估算）
-  │   └─ 写入记忆（trip_count++）
-  │
-  └─ graph.invoke(state)
-       │
-       ├─ Node 1: attraction    ① maps_geo → 城市中心  ② maps_around 20km 搜索景点  ③ 本地 Python 计算景点群质心
-       ├─ Node 2: hotel         使用景点质心 nearby 搜索酒店
-       ├─ Node 3: memory        加载用户画像（纯本地）
-       └─ Node 4: planner       整合数据 + 本地校验（硬伤/软伤/离群检测）→ JSON
-            │
-            ├─ retry_planner: 硬伤重生成（最多 3 次）
-            ├─ retry_hotel:   离群景点 → 重算中心 → 回酒店重搜（最多 2 次）
-            └─ done:          输出最终计划
-            │
-            └─ 降级检测: 所有 error_log 累积 → 前端列表展示
-```
+- **v1**（master）：ReAct 内循环，4 感知 Agent 共享 MCP 工具
+- **v2**（preview）：attraction/hotel 改确定性检索节点，LLM 调用 3→1 次/请求
+- **v3**（preview）：分日并行（Send fan-out）+ 数据层互斥 + 路径/选址本地化，LLM 只剩文案
 
-### 技术栈
-
-| 组件 | 选型 |
-|------|------|
-| 编排引擎 | LangGraph StateGraph |
-| Agent 框架 | HelloAgents SimpleAgent |
-| 工具协议 | MCP (amap-mcp-server, 16 个工具) |
-| LLM | DeepSeek (via HelloAgentsLLM) |
-| Web 框架 | FastAPI + Pydantic v2 |
-| 记忆 | 自定义五因子权重 + 双轨异常检测 |
-| 前端 | 单文件 HTML (零依赖) |
-
-### 工具架构
-
-```
-Agent 视角:  只看到 1 个 Tool (AmapToolWrapper)
-
-内部 3 层处理:
-  第 1 层  MCP 调用    maps_text_search / maps_weather
-  第 2 层  Format       JSON → 结构化文本（纯 Python）
-  第 3 层  Validate     完整性检查 + 默认值
-```
-
-### 记忆系统
-
-**五因子权重公式：**
-
-```
-final_weight = domain × decay × interaction × frequency_boost × outlier_penalty
-```
-
-**双轨异常检测：**
-
-| 轨道 | 数据类型 | 算法 | 示例 |
-|------|---------|------|------|
-| 数值型 | 价格标签 | IQR 四分位距 | 5 次 ¥300-500 → 1 次 ¥1500 → outlier |
-| 分类型 | 偏好标签 | 频率比 | 5 次"不吃辣" → 1 次"爱吃辣" → outlier |
-
-**画像维度（8 维）：** 出行方式 / 距离偏好 / 住宿 / 预算 / 饮食 / 交通 / 节奏 / 兴趣
-
-### 扩展: Agent 反馈环与离群检测
-
-当前图是 4 Node + Conditional Edge 流: `attraction → hotel → memory → planner → [retry_planner / retry_hotel / done]`。
-
-**已实现的 Conditional Edge 路由：**
-
-| 路由 | 触发条件 | 行为 | 上限 |
-|------|---------|------|------|
-| `retry_planner` | 硬伤（缺字段/景点<2/预算超30%） | planner 自回环重生成 | MAX_RETRY=3 |
-| `retry_hotel` | 离群景点（标准差 > mean+1.5σ 或 >80km） | 重算中心 → hotel 重搜 | MAX_HOTEL_RETRY=2 |
-| `done` | 校验通过或重试耗尽 | → END | — |
-
-**离群检测双轮过滤：**
-1. **硬上限（80km）**：景点到群中心距离 >80km → 直接排除（非城市景点）
-2. **标准差法（1.5σ）**：距离 > mean + 1.5×σ → 标记离群 → 排除后重算质心 → 触发 retry_hotel
-
-LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓扑层面的路由配置，无需改动 Node 内部逻辑。
-
----
-
-## 🔮 后续更新计划
-
-### ✅ 已落地
-
-- [x] **Conditional Edge**：`retry_planner`（硬伤重生成 ≤3）+ `retry_hotel`（离群重算 ≤2）
-- [x] **流式响应 (SSE)**：API → Server-Sent Events，前端实时展示每个 Node 进度
-- [x] **前端组件化**：单文件 HTML → Vue 3 SPA
-- [x] **API 层与图内并发**：`intercity ∥ weather`、`maps_geo` 双查、`memory ∥ attraction` fan-out 拓扑
-- [x] **前端 UX 升级**：Glassmorphism + 3D tilt hover + 鼠标追踪 spotlight + 卡片入场 stagger + 数字 count-up + budget bar 生长动画（无外部动画库依赖）
-
-### 🥇 P0 · 补后端硬实力（强推）
-
-- [ ] **Docker + docker-compose 一键部署**：redis + postgres + backend + frontend + nginx —— 练镜像编排 / 网络 / volume 持久化
-- [ ] **Redis 缓存层**：高德 POI 查询缓存 —— 练**缓存三兄弟**（穿透 / 击穿 / 雪崩）
-- [ ] **多用户 + JWT 鉴权 + 记忆隔离**：当前单租户，加 RBAC + 分租户存储
-- [ ] **Prometheus + Grafana 可观测性 + 全链路 traceId**：QPS / P99 / MCP 调用成功率仪表盘
-
-### 🥈 P1 · AI 加深
-
-- [ ] **Critic Agent 替代硬编码 `_validate_and_refine`**：Planner + Critic 循环，多智能体叙事升级
-- [ ] **Planner 用 LangGraph `Send` API 每日 fan-out**：N 天并行生成 subplan → fan-in 合并
-- [ ] **向量化记忆检索**：Embedding + 相似度替代关键词匹配，支持"用户之前去杭州时喜欢什么"语义查询
-- [ ] **A2A 协议集成**：Agent-to-Agent 通信，TripPlanner 作为 Agent 被其他系统调用
-- [ ] **多 LLM 提供商**：OpenAI / Claude / 本地 Ollama 切换
-
-### 🥉 P2 · 产品完成度
-
-- [ ] **导出行程**：PDF / 日历 ICS / 图片
-- [ ] **地图组件**：Leaflet / Mapbox 显示行程路线 + 景点热力图
-- [ ] **移动端 PWA**
-- [ ] **推送通知**：出行前 24h / 天气突变提醒
-- [ ] **多语言 i18n**
-
-### 🧪 工程质量（穿插做）
-
-- [ ] **pytest 单元 + 集成测试**：各 Node 覆盖率 + E2E
-- [ ] **CI/CD**：GitHub Actions（lint + build + test）
-- [ ] **压测报告 + 性能基线**：K6 / Locust
-
-### 容错与恢复（已落地）
-
-- **LangGraph Checkpoint**: SQLite 持久化（`data/checkpoints.db`），进程重启后断点续传
-- **LLM 退避重试**: 指数退避 max 3 次（1s → 2s → 4s）
-- **MCP 调用超时**: 10s timeout 保护（`amap_wrapper.py`）
-- **记忆去重**: 连续相同记录跳过写入
-- **SSE 取消传播**: 客户端断开后后台线程感知取消信号
-- 总计 ~200 行新增，零删除
-
-### 并发优化（已落地）
-
-三处独立任务从串行改并行，无需应用层锁——`MCPTool.run()` 每次调用内部新建独立 event loop + MCPClient 连接，无共享 mutable state；`error_log` 由 `Annotated[list, add]` reducer 合并。
-
-- **API 预处理并行** (`app/api/trip.py`)：`_compute_intercity` ∥ `_fetch_weather` 用 `ThreadPoolExecutor` 同时提交；`/api/trip` 与 `/api/trip/stream` 两个端点一致改造。预处理耗时从 `t1 + t2` 变为 `max(t1, t2)`
-- **maps_geo 双查并行** (`app/api/trip.py`)：`_compute_intercity` 内 origin/destination 地理编码同时提交，节省一次 MCP round-trip（~200-500ms）
-- **LangGraph 拓扑 fan-out** (`app/graph/builder.py`)：`START → [attraction, memory]` 并行入口 + planner 双入边 join。memory 是纯本地 JSON 读，与 attraction 的 LLM+MCP 长任务并行不阻塞；planner 自动等 hotel + memory 都到达
-- 端到端验证（上海→杭州 2 天）：`graph.invoke` 76.6s，final_plan 完整，`user_profile 加载: True` 直接证明 memory 边执行到位
-
----
-
-## 📁 项目结构
-
-```
-tripplanner/
-├── README.md                    # 本文件
-├── CLAUDE.md                    # 项目备忘录（Claude Code 自动读取）
-├── ARCHITECTURE.md              # 7 张 Mermaid 架构图
-├── docs/                        # 详细文档
-│   ├── OVERVIEW.md              # 项目总览（精简版）
-│   └── technical-notes/         # 深入技术设计（分布式容错评估等）
-├── backend/                     # FastAPI + LangGraph
-│   ├── app/{agents,graph,tools,memory,api,models,services}
-│   ├── data/                    # memory.json + checkpoints.db
-│   └── run.py
-└── frontend/                    # Vue 3 单页应用
-```
-
-### 文档地图
-
-| 想看什么 | 去哪里 |
-|---------|--------|
-| 项目总览（精简） | [`docs/OVERVIEW.md`](docs/OVERVIEW.md) |
-| 架构图（Mermaid） | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
-| 分布式容错评估 | [`docs/technical-notes/interrupt-resilient-design.md`](docs/technical-notes/interrupt-resilient-design.md) |
-| 项目备忘录（环境/分支流程/设计原则） | [`CLAUDE.md`](CLAUDE.md) |
-
----
-
-## 🖥 前端功能
-
-| 功能 | 说明 |
-|------|------|
-| 8 维度偏好标签 | 景点/饮食/交通/节奏/住宿/预算/出行方式 |
-| 出行方式选择 | 高铁/飞机/自驾 |
-| 用户画像面板 | 0/5 渐进构建 → 5 次后展示 8 维画像 |
-| 降级列表面板 | 实时展示各步骤的降级信息 |
-| 预算可视化 | 堆叠条形图 |
-| 天气预报卡片 | 7 日预报 |
-
----
-
-## 📄 License
-
-MIT
+git log 的迭代提交就是完整证据：`isolate requests → 结构化候选链路 → 分日并发重构`。

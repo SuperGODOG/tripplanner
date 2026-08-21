@@ -4,6 +4,9 @@ backend/venv/
 # 记忆数据
 backend/data/
 
+# 运行时数据（checkpoint / 记忆，根目录由 builder.py 生成）
+data/
+
 # Python
 __pycache__/
 *.pyc

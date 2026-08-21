@@ -13,10 +13,10 @@ Wrapper 内部路径:
   params["type"]=="around"    → 新路径: maps_around_search（周边搜索，POI 无坐标需 geo 增强）
 """
 import json, re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from hello_agents.tools import Tool, ToolParameter
-from ..services.amap_service import get_amap_mcp_tool
+from ..services.amap_service import get_amap_mcp_tool, run_mcp, geo_cached
 from ..models.candidates import PoiCandidate, HotelCandidate
 
 
@@ -163,13 +163,12 @@ class AmapToolWrapper(Tool):
         })
 
     def _mcp_run_with_timeout(self, args: dict, timeout: int = 10) -> Any:
-        """MCP 调用包装超时，避免长时间阻塞"""
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(self._mcp.run, args)
-            try:
-                return future.result(timeout=timeout)
-            except FutTimeout:
-                return {"error": "MCP timeout"}
+        """MCP 调用包装超时——统一经全局 MCP 线程池（并发 ≤ MCP_MAX_WORKERS）。
+
+        不能用实例级线程池——后续调用会复用导致状态污染（历史注释保留）；
+        全局池同样按次提交+超时，池内只跑叶子 mcp.run，无共享状态。
+        """
+        return run_mcp(args, timeout)
 
     # ================================================================
     # 第 1.5 层: 坐标增强
@@ -187,17 +186,9 @@ class AmapToolWrapper(Tool):
 
         def geo_poi(poi):
             addr = poi.get("address", "") or poi.get("name", "")
-            try:
-                r = self._mcp.run({
-                    "action": "call_tool", "tool_name": "maps_geo",
-                    "arguments": {"address": addr},
-                })
-                m = re.search(r'"location"\s*:\s*"([\d.]+),([\d.]+)"', str(r))
-                if m:
-                    poi["_lng"] = float(m.group(1))
-                    poi["_lat"] = float(m.group(2))
-            except Exception:
-                pass
+            coord = geo_cached(addr)  # LRU 缓存 + 全局池限流
+            if coord:
+                poi["_lng"], poi["_lat"] = coord
             return poi
 
         futures = [self._executor.submit(geo_poi, p) for p in pois[:10]]
@@ -218,7 +209,9 @@ class AmapToolWrapper(Tool):
             return self._format_weather(data)
         return self._format_poi(data, stype)
 
-    def _format_weather(self, data: dict) -> str:
+    @staticmethod
+    def _format_weather(data: dict) -> str:
+        """天气文本格式化——静态方法，API 层 _fetch_weather 也复用（防双份实现）。"""
         lines = ["【天气信息】"]
         forecasts = data.get("forecasts", []) if isinstance(data, dict) else []
         if not forecasts and isinstance(data, list):
@@ -273,7 +266,9 @@ class AmapToolWrapper(Tool):
     # 工具方法
     # ================================================================
 
-    def _extract_json(self, raw: Any) -> dict | None:
+    @staticmethod
+    def _extract_json(raw: Any) -> dict | None:
+        """从 MCP 原始返回中提取 JSON dict——静态方法，API 层 _fetch_weather 也复用。"""
         if isinstance(raw, dict):
             return raw
         s = str(raw)
