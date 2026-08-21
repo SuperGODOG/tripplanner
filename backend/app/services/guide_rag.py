@@ -117,8 +117,11 @@ class GuideRAG:
         if not candidates:
             return []
 
-        # ── 3. 候选段落 BM25 评分（query = 景点名）──
-        query_tokens = _tokenize(name)
+        # ── 3. 候选段落 BM25 评分 ──
+        # query 增强: 景点名 + 通用攻略意图词"玩法"——攻略段落通常不重复主题词
+        #（如故宫玩法段不含"故宫"字样），纯主题词 query 会大面积零命中；意图词
+        # 匹配段落标签前缀【玩法】,这是轻量 RAG 的经典补偿（可讲）。
+        query_tokens = _tokenize(name) + _tokenize("玩法")
         scored = []
         for pi, (gi, _, text) in enumerate(self.paras):
             if gi not in candidates:
