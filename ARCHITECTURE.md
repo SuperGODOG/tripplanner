@@ -442,7 +442,7 @@ flowchart LR
 
     N1 --> N2 --> N3 --> N4 --> N5 --> N0
 
-    subgraph Test["测试基线: 50 用例（无网络无 LLM，Fake 注入）"]
+    subgraph Test["测试基线: 60 用例（无网络无 LLM，Fake 注入）"]
         direction TB
         T1["Send 语义验证（汇聚只触发 1 次）"]
         T2["跨天互斥（聚类分配不重复）"]
@@ -482,4 +482,4 @@ flowchart LR
 ---
 
 _定位: `/home/caoruixin/projects/tripplanner/ARCHITECTURE.md`_
-_最后更新: 2026-08-21 — v3 分日并发架构：Send API 动态 fan-out（day_node × N 并行 → merge_node 汇聚 1 次）、K-Means 聚簇数据层互斥、本地路径求解（贪心+2-opt+时间窗）、minimax 酒店选址、全局 MCP 并发闸、单天文案 LLM、全图无回环、测试基线 50 用例_
+_最后更新: 2026-08-21 — v3 分日并发架构：Send API 动态 fan-out（day_node × N 并行 → merge_node 汇聚 1 次）、K-Means 聚簇数据层互斥、本地路径求解（贪心+2-opt+时间窗）、minimax 酒店选址、全局 MCP 并发闸、单天文案 LLM、全图无回环、攻略知识库 RAG（手写 BM25）、测试基线 60 用例_

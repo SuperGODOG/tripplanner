@@ -530,8 +530,12 @@ def _fan_out(state: TripPlannerState) -> list[Send]:
 
 
 def _format_day_prompt(idx: int, date: str, kind: str, attractions: list,
-                       state: TripPlannerState) -> str:
-    """单天文案 prompt（LLM 只写文案，不决策选点/顺序/时间）。"""
+                       state: TripPlannerState,
+                       guide_lines: list[str] | None = None) -> str:
+    """单天文案 prompt（LLM 只写文案，不决策选点/顺序/时间）。
+
+    guide_lines: 攻略知识库检索片段（v3.1，可引用具体玩法/避坑细节）。
+    """
     city = state.get("city", "")
     prefs = state.get("preferences", [])
     profile = state.get("user_profile", {})
@@ -571,6 +575,11 @@ def _format_day_prompt(idx: int, date: str, kind: str, attractions: list,
     if constraints:
         lines.append(constraints.strip())
 
+    # v3.1: 攻略知识库片段（真实玩法/避坑经验，可引用进文案）
+    if guide_lines:
+        lines.append("**参考攻略片段（来自攻略知识库，请在文案中自然引用其中的具体玩法/避坑细节）:**")
+        lines.extend(guide_lines[:4])
+
     lines.append(
         '请只输出 JSON 对象: {"description": "第N天行程概述(80字内)", '
         '"transportation": "市内交通建议(50字内)", '
@@ -598,6 +607,7 @@ def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
         "date": date, "day_index": idx, "kind": kind,
         "description": "", "transportation": "", "accommodation": "",
         "hotel": {}, "attractions": [], "meals": [], "overall_tips": "",
+        "guide_references": [],   # v3.1: 攻略知识库引用（可溯源）
     }
 
     # ── 自由活动日: 零 LLM，本地模板 ──
@@ -625,8 +635,25 @@ def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
                 for p in pois]
     attractions = format_plan(plan)
 
+    # ── v3.1: 攻略知识库检索（轻量 RAG，BM25；异常/未命中静默降级）──
+    # 每个景点最多取 1 段，最多 3 个景点——控制 prompt 体积；引用写入 day 可溯源
+    guide_refs: list[dict] = []
+    guide_lines: list[str] = []
+    try:
+        from ..services.guide_rag import get_guide_rag
+        rag = get_guide_rag()
+        city = state.get("city", "")
+        for a in attractions[:3]:
+            for hit in rag.retrieve(a["name"], city=city or None, top_k=1):
+                guide_refs.append({"attraction": a["name"], "guide": hit["guide"],
+                                   "city": hit["city"], "tag": hit["tag"]})
+                guide_lines.append(f"  · {hit['guide']}（{hit['tag']}）: {hit['text']}")
+    except Exception:
+        pass  # 知识库缺失/异常 → 不阻断
+    day["guide_references"] = guide_refs
+
     # ── LLM 文案（失败本地兜底，不阻断）──
-    text = _format_day_prompt(idx, date, kind, attractions, state)
+    text = _format_day_prompt(idx, date, kind, attractions, state, guide_lines)
     try:
         planner = get_planner()
         result = planner._run_agent_with_retry(

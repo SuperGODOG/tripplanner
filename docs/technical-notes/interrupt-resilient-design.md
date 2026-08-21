@@ -178,7 +178,7 @@ START → [attraction, memory]（fan-out）→ hotel → _fan_out（Send × days
 
 ---
 
-## 六、测试基线（50 用例）
+## 六、测试基线（60 用例）
 
 `tests/conftest.py` 全 Fake 注入，无网络无 LLM：
 

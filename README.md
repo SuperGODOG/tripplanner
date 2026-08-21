@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.139-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"/>
   <img src="https://img.shields.io/badge/LangGraph-1.2-1C3C3C?style=flat-square&logo=langchain&logoColor=white" alt="LangGraph"/>
   <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue3"/>
-  <img src="https://img.shields.io/badge/tests-50%20passed-2ea44f?style=flat-square" alt="tests"/>
+  <img src="https://img.shields.io/badge/tests-60%20passed-2ea44f?style=flat-square" alt="tests"/>
 </p>
 
 # 🧳 TripPlanner
@@ -48,6 +48,7 @@ flowchart TB
 | 🧭 | **路径本地求解** | 贪心最近邻 + 2-opt + 时间窗硬检查（Haversine × 绕路系数），零 API 调用；≤8 节点按规模选型不上求解器 |
 | 🏨 | **目标函数选址** | 全程酒店按 minimax 通勤距离对真实候选打分（替代几何质心——离群敏感且无业务语义） |
 | ✍️ | **LLM 最小职责** | 每天一次文案调用（JSON mode），只写 description/tips；失败本地模板兜底，计划永不中断 |
+| 📚 | **攻略知识库（RAG）** | 手写 BM25 检索 30 篇小红书风攻略注入文案 prompt（引用可溯源）；确定性 query 不上向量库 |
 | 🧠 | **记忆统计信号** | SQLite 租户隔离 + 频率加成 / IQR 异常检测，画像渐进构建（≥5 次行程才启用） |
 | 🛡️ | **韧性** | SQLite checkpoint 断点续传 · LLM 指数退避 · SSE 断开取消 · MCP 超时 · 全局并发闸(10) 防 QPS 打爆 |
 
@@ -78,7 +79,7 @@ cd .. && bash start.sh
 cd backend && ./venv/bin/python -m pytest tests -q
 ```
 
-**50 个用例 · 无网络 · 无 LLM**（Fake 组件注入：FakeAmapWrapper / FakePlanner / FakeRepository）。
+**60 个用例 · 无网络 · 无 LLM**（Fake 组件注入：FakeAmapWrapper / FakePlanner / FakeRepository）。
 测试基线一次捕获过 5 个真实 bug：LangGraph fan-in 双触发、MCP 工具名错误、POI 无坐标、
 画像 None 击穿、LLM 幻觉坐标（偏差 1300km）。
 
@@ -95,11 +96,12 @@ backend/
 │   │   ├── clustering.py      # 手写 K-Means（k-means++）聚簇分天
 │   │   ├── route_solver.py    # 贪心最近邻 + 2-opt + 时间窗
 │   │   ├── amap_service.py    # 全局 MCP 并发闸 + geo 缓存(LRU)
+│   │   ├── guide_rag.py       # 手写 BM25 攻略知识库检索（RAG）
 │   │   └── llm_service.py     # DeepSeek 封装 + 指数退避
 │   ├── tools/amap_wrapper.py  # 高德 MCP 包装（结构化候选 + 坐标增强）
 │   ├── memory/                # 分类器 / MemoryManager / SQLite 仓库
 │   └── agents/                # day_agent（单天文案，JSON mode）
-├── tests/                     # 50 用例（全 Fake 注入）
+├── tests/                     # 60 用例（全 Fake 注入）
 └── data/                      # 运行时数据（gitignored）
 frontend/                      # Vue 3 单文件 · SSE 流式进度 · 降级面板
 ```

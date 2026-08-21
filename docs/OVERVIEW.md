@@ -65,7 +65,7 @@ flowchart LR
 
 ## 六、测试与质量
 
-- **50 用例，无网络无 LLM**：FakeAmapWrapper / FakePlanner 注入 + InMemorySaver，覆盖分日互斥、路径求解、文案兜底、乱序聚合、偏好路由等
+- **60 用例，无网络无 LLM**：FakeAmapWrapper / FakePlanner 注入 + InMemorySaver，覆盖分日互斥、路径求解、文案兜底、乱序聚合、偏好路由、RAG 检索等
 - 基线实测抓过 **5 个真实 bug**：
   1. 跨 superstep fan-in 双触发（planner 每请求跑两遍）
   2. `maps_around_search` 工具名错误（around 路径静默失败）
