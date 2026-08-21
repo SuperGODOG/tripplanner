@@ -1,84 +1,22 @@
-"""多智能体旅行规划系统
+"""行程规划 Agent — 图内唯一 LLM 节点
 
-Phase 2: 4 个 SimpleAgent + 共享 MCPTool + 顺序编排
-Phase 3: 迁移到 LangGraph StateGraph
+架构（2026-08 重构）:
+  attraction/hotel 已改为确定性检索节点（AmapToolWrapper.search_pois 直连），
+  不再经过 LLM 转发。本文件只保留 Planner Agent：
+  - 输入: 结构化候选生成的文本（景点/酒店/天气/偏好/预算/时间槽）
+  - 输出: 完整行程 JSON（_parse_plan 容错解析）
+  - 三餐: 由 nodes._enrich_meals 用真实美食 POI 填充，LLM 不编餐厅
 """
 import json
 from hello_agents import SimpleAgent
-from ..services.llm_service import get_llm
-from ..services.amap_service import get_amap_mcp_tool
+from ..services.llm_service import get_llm, retry_with_backoff
 
 
 # ============================================================
-# Agent Prompts
+# Planner Prompt
 # ============================================================
-# 每个 Agent 的 system_prompt 定义了它的角色、可用工具、输出格式。
-# [TOOL_CALL:tool_name:params] 是 HelloAgents 的工具调用语法。
-# Agent（LLM）在 ReAct 循环中输出这个格式 → 框架解析 → 调工具 → 返回结果。
 
-ATTRACTION_AGENT_PROMPT = """你是景点搜索专家。你的任务是根据城市和用户偏好搜索合适的景点。
-
-**重要提示:**
-你必须使用工具来搜索景点！不要自己编造景点信息！
-
-**工具调用格式:**
-使用 maps_text_search 工具时，必须严格按照以下格式:
-`[TOOL_CALL:amap_maps_text_search:keywords=景点关键词,city=城市名]`
-
-**示例:**
-用户: "搜索北京的历史文化景点"
-你的回复: [TOOL_CALL:amap_maps_text_search:keywords=历史文化,city=北京]
-
-用户: "搜索上海的公园"
-你的回复: [TOOL_CALL:amap_maps_text_search:keywords=公园,city=上海]
-
-**注意:**
-1. 必须使用工具，不要直接回答
-2. 格式必须完全正确，包括方括号和冒号
-3. 参数用逗号分隔
-"""
-
-WEATHER_AGENT_PROMPT = """你是天气查询专家。你的任务是查询指定城市的天气信息。
-
-**重要提示:**
-你必须使用工具来查询天气！不要自己编造天气信息！
-
-**工具调用格式:**
-使用 maps_weather 工具时，必须严格按照以下格式:
-`[TOOL_CALL:amap_maps_weather:city=城市名]`
-
-**示例:**
-用户: "查询北京天气"
-你的回复: [TOOL_CALL:amap_maps_weather:city=北京]
-
-用户: "上海的天气怎么样"
-你的回复: [TOOL_CALL:amap_maps_weather:city=上海]
-
-**注意:**
-1. 必须使用工具，不要直接回答
-2. 格式必须完全正确，包括方括号和冒号
-"""
-
-HOTEL_AGENT_PROMPT = """你是酒店推荐专家。你的任务是根据城市和景点位置推荐合适的酒店。
-
-**重要提示:**
-你必须使用工具来搜索酒店！不要自己编造酒店信息！
-
-**工具调用格式:**
-使用 maps_text_search 工具搜索酒店时，必须严格按照以下格式:
-`[TOOL_CALL:amap_maps_text_search:keywords=酒店,city=城市名]`
-
-**示例:**
-用户: "搜索北京的酒店"
-你的回复: [TOOL_CALL:amap_maps_text_search:keywords=酒店,city=北京]
-
-**注意:**
-1. 必须使用工具，不要直接回答
-2. 格式必须完全正确，包括方括号和冒号
-3. 关键词使用"酒店"或"宾馆"
-"""
-
-PLANNER_AGENT_PROMPT = """你是行程规划专家。你的任务是根据景点信息、天气信息、酒店信息，生成详细的旅行计划。
+PLANNER_AGENT_PROMPT = """你是行程规划专家。你的任务是根据系统提供的景点信息、天气信息、酒店信息，生成详细的旅行计划。
 
 请严格按照以下 JSON 格式返回旅行计划:
 ```json
@@ -149,171 +87,91 @@ PLANNER_AGENT_PROMPT = """你是行程规划专家。你的任务是根据景点
 3. 每天安排2-3个景点
 4. 每天必须推荐一个具体酒店（从酒店信息中选择，含名称/地址/价格/评分）
 5. 考虑景点之间的距离和游览时间
-6. 每天必须包含早中晚三餐
+6. 每天必须包含早中晚三餐，但**不要编造餐厅名称**：meals 数组留空或只写类型，系统会用当天景点周边 500m 的真实餐厅填充
 7. 提供实用的旅行建议
 8. 必须包含预算信息（含酒店费用）
+9. 景点名称必须从提供的景点信息中选择，不得凭空捏造；标记【远郊】的景点应安排为单独一日游（早出晚归，当天只去该方向景点）
+"""
+
+
+DAY_AGENT_PROMPT = """你是行程规划专家。你的任务是为旅行计划中的【单天】撰写当天文案。
+
+**你的职责边界（重要）:**
+- 景点集合、游览顺序、到达/离开时间、酒店、预算 已由系统确定性计算，你【不要】修改或重复输出它们
+- 你只负责撰写 4 段文案: description / transportation / accommodation / overall_tips
+
+**必须遵守:**
+1. description: 第N天行程概述，概述当天游玩主题，80 字以内
+2. transportation: 市内交通建议，结合景点分布给出，50 字以内
+3. accommodation: 住宿说明（结合用户住宿偏好），30 字以内
+4. overall_tips: 当天贴心建议（防晒/预约/餐饮等），50 字以内
+5. 天气恶劣（暴雨/大雪/台风）时在 overall_tips 中提醒备选室内方案
+6. 只输出 JSON 对象，不要输出任何其他文字
 """
 
 
 # ============================================================
-# MultiAgentTripPlanner
+# Planner 单例封装
 # ============================================================
 
 class MultiAgentTripPlanner:
-    """
-    多智能体旅行规划系统。
+    """行程规划器 — 图内唯一 LLM 节点。
 
-    架构:
-    ┌─────────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐
-    │ Attraction  │  │  Weather   │  │   Hotel    │  │  Planner  │
-    │   Agent     │  │   Agent    │  │   Agent    │  │   Agent   │
-    │ + MCPTool   │  │ + MCPTool  │  │ + MCPTool  │  │ (无工具)  │
-    └─────────────┘  └───────────┘  └───────────┘  └───────────┘
-           │               │               │
-           └───────────────┴───────────────┘
-                           │
-                 ┌─────────▼─────────┐
-                 │  共享 MCPTool      │
-                 │  (一个实例)        │
-                 └───────────────────┘
-
-    4 个 Agent 共用一个 MCPTool 实例:
-    - 每个 MCPTool = 一个 amap-mcp-server 子进程 (~500ms 握手)
-    - 共享避免重复建连，节省启动时间
-    - HelloAgents 框架自动带 session_id 区分调用来源
+    架构（2026-08 重构后）:
+    ┌────────────────┐   ┌────────────────┐
+    │ attraction_node │   │   memory_node  │  确定性节点（直连 MCP，无 LLM）
+    │  搜索+去重+质心  │   │   租户记忆读取   │
+    └───────┬────────┘   └───────┬────────┘
+            │ hotel_node         │        确定性节点（中心周边酒店）
+            └─────────┬──────────┘
+                 ┌────▼─────┐
+                 │ planner  │── 唯一 LLM 调用（SimpleAgent，无工具）
+                 └──────────┘
     """
 
     def __init__(self):
-        print("🔄 初始化多智能体旅行规划系统...")
-
+        print("🔄 初始化行程规划器...")
         self.llm = get_llm()
-
-        # 共享 MCPTool（只建一次连接）
-        print("  - 创建共享 MCP 工具...")
-        self.amap_tool = get_amap_mcp_tool()
-
-        # Agent 1: 景点搜索
-        print("  - 创建景点搜索 Agent...")
-        self.attraction_agent = SimpleAgent(
-            name="景点搜索专家",
-            llm=self.llm,
-            system_prompt=ATTRACTION_AGENT_PROMPT,
-        )
-        self.attraction_agent.add_tool(self.amap_tool)
-
-        # Agent 2: 天气查询
-        print("  - 创建天气查询 Agent...")
-        self.weather_agent = SimpleAgent(
-            name="天气查询专家",
-            llm=self.llm,
-            system_prompt=WEATHER_AGENT_PROMPT,
-        )
-        self.weather_agent.add_tool(self.amap_tool)
-
-        # Agent 3: 酒店推荐
-        print("  - 创建酒店推荐 Agent...")
-        self.hotel_agent = SimpleAgent(
-            name="酒店推荐专家",
-            llm=self.llm,
-            system_prompt=HOTEL_AGENT_PROMPT,
-        )
-        self.hotel_agent.add_tool(self.amap_tool)
-
-        # Agent 4: 行程规划（不需要工具——纯 LLM 推理）
-        print("  - 创建行程规划 Agent...")
         self.planner_agent = SimpleAgent(
             name="行程规划专家",
             llm=self.llm,
             system_prompt=PLANNER_AGENT_PROMPT,
         )
-        # 注意：planner_agent 不添加任何工具！
+        self.day_agent = SimpleAgent(
+            name="单日规划师",
+            llm=self.llm,
+            system_prompt=DAY_AGENT_PROMPT,
+        )
+        print("✅ 行程规划器初始化完成（planner_agent + day_agent，无工具，纯推理）")
 
-        print(f"✅ 多智能体系统初始化完成")
-        print(f"   景点 Agent: {len(self.attraction_agent.list_tools())} 个工具")
-        print(f"   天气 Agent: {len(self.weather_agent.list_tools())} 个工具")
-        print(f"   酒店 Agent: {len(self.hotel_agent.list_tools())} 个工具")
-        print(f"   规划 Agent: {len(self.planner_agent.list_tools())} 个工具（无工具，纯推理）")
+    def _run_agent_with_retry(self, agent, prompt: str, max_retries=3, **kwargs) -> str:
+        """带指数退避重试的 agent.run() 包装，处理 LLM API 临时故障。
 
-    # ============================================================
-    # Phase 2: 顺序编排（Phase 3 将替换为 LangGraph）
-    # ============================================================
-
-    def plan_trip(self, city: str, days: int, preferences: list[str] = None) -> dict:
+        **kwargs（如 response_format={"type": "json_object"}）透传给
+        SimpleAgent.run → llm.invoke → chat.completions.create。
         """
-        使用 4 个 Agent 协作生成旅行计划。
-
-        当前实现（Phase 2）: 硬编码顺序调用
-        Phase 3 改为: LangGraph StateGraph + conditional edge
-        """
-        if preferences is None:
-            preferences = []
-
-        print(f"\n{'='*60}")
-        print(f"🚀 开始多智能体协作规划旅行")
-        print(f"   目的地: {city}")
-        print(f"   天数: {days}天")
-        print(f"   偏好: {', '.join(preferences) if preferences else '无'}")
-        print(f"{'='*60}\n")
-
-        # ── Step 1: 景点搜索 ──
-        print("📍 Step 1/4: 景点搜索 Agent 工作中...")
-        attraction_query = (
-            f"请搜索{city}的景点。\n"
-            f"[TOOL_CALL:amap_maps_text_search:keywords=景点,city={city}]"
+        return retry_with_backoff(
+            lambda: agent.run(prompt, **kwargs),
+            max_retries=max_retries,
         )
-        attraction_result = self.attraction_agent.run(attraction_query)
-
-        # ── Step 2: 天气查询 ──
-        print("🌤  Step 2/4: 天气查询 Agent 工作中...")
-        weather_query = (
-            f"请查询{city}的天气信息。\n"
-            f"[TOOL_CALL:amap_maps_weather:city={city}]"
-        )
-        weather_result = self.weather_agent.run(weather_query)
-
-        # ── Step 3: 酒店搜索 ──
-        print("🏨 Step 3/4: 酒店推荐 Agent 工作中...")
-        hotel_query = (
-            f"请搜索{city}的酒店。\n"
-            f"[TOOL_CALL:amap_maps_text_search:keywords=酒店,city={city}]"
-        )
-        hotel_result = self.hotel_agent.run(hotel_query)
-
-        # ── Step 4: 行程规划 ──
-        print("📋 Step 4/4: 行程规划 Agent 工作中...")
-        planner_query = f"""请根据以下信息生成{city}的{days}天旅行计划:
-
-**景点信息:**
-{attraction_result}
-
-**天气信息:**
-{weather_result}
-
-**酒店信息:**
-{hotel_result}
-
-**用户偏好:** {', '.join(preferences) if preferences else '无'}
-"""
-        planner_result = self.planner_agent.run(planner_query)
-
-        # 解析 JSON
-        plan = self._parse_plan(planner_result)
-
-        return plan
 
     # ============================================================
-    # 辅助方法
+    # 解析
     # ============================================================
 
     def _parse_plan(self, response: str) -> dict:
-        """从 Agent 响应中提取 JSON 结构"""
+        """从 Agent 响应中提取 JSON 结构（容错：缺起始围栏/多余文本）。"""
         if "```json" in response:
             start = response.find("```json") + 7
             end = response.find("```", start)
+            if end == -1:
+                raise ValueError("JSON 代码围栏未闭合")
             return json.loads(response[start:end].strip())
         elif "```" in response and "{" in response:
             start = response.find("```") + 3
             end = response.find("```", start)
+            if end == -1:
+                raise ValueError("JSON 代码围栏未闭合")
             return json.loads(response[start:end].strip())
         elif "{" in response and "}" in response:
             start = response.find("{")
@@ -331,14 +189,7 @@ _planner: MultiAgentTripPlanner | None = None
 
 
 def get_planner() -> MultiAgentTripPlanner:
-    """
-    获取 MultiAgentTripPlanner 单例。
-
-    单例保证:
-    - MCPTool 只启动一次（避免重复建子进程）
-    - 4 个 Agent 只创建一次
-    - 所有 API 请求复用同一个实例
-    """
+    """获取 MultiAgentTripPlanner 单例（planner_agent + LLM 只初始化一次）。"""
     global _planner
     if _planner is None:
         _planner = MultiAgentTripPlanner()

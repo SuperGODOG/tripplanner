@@ -5,5 +5,5 @@ __pycache__/
 # 虚拟环境（含真实 Key）
 venv/
 
-# 记忆数据
-data/
+# 记忆数据（锚定 backend 根——无锚定会误伤 backend/app/data/ 攻略知识库）
+/data/

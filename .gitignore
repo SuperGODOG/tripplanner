@@ -4,16 +4,26 @@ backend/venv/
 # 记忆数据
 backend/data/
 
+# 运行时数据（checkpoint / 记忆，根目录由 builder.py 生成）
+# 注意: 必须锚定 /data/——无锚定的 data/ 会匹配 backend/app/data/（攻略知识库静态资产）
+/data/
+
 # Python
 __pycache__/
 *.pyc
 
 # IDE
 .vscode/
-!.vscode/settings.json
-!.vscode/launch.json
 .idea/
 
 # 临时文件
 .~*
 *.swp
+
+# 本地开发日志（问题场景/备选方案记录）
+__log/
+
+# 运行时（start.sh/stop.sh 产生）
+*.log
+.backend.pid
+.frontend.pid

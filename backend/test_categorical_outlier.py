@@ -9,9 +9,9 @@ sys.path.insert(0, ".")
 if os.path.exists("data/memory.json"):
     os.remove("data/memory.json")
 
-from app.memory.manager import get_memory
+from app.memory.manager import MemoryManager
 
-memory = get_memory()
+memory = MemoryManager()
 memory._entries = []
 
 print("=" * 60)

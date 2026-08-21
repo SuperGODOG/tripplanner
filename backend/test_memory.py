@@ -9,7 +9,7 @@
 import sys
 sys.path.insert(0, ".")
 
-from app.memory.manager import get_memory
+from app.memory.manager import MemoryManager
 
 
 def test_basic():
@@ -18,7 +18,7 @@ def test_basic():
     print("测试 1: 基础功能（分类 + 标签）")
     print("=" * 60)
 
-    memory = get_memory()
+    memory = MemoryManager()
 
     e1 = memory.add("我喜欢历史文化景点", "confirm")
     print(f"  ✅ {e1.content} → category={e1.category}, tags={e1.tags}")
@@ -39,7 +39,7 @@ def test_frequency_boost():
     print("测试 2: 频率加成")
     print("=" * 60)
 
-    memory = get_memory()
+    memory = MemoryManager()
 
     # 多次添加相同偏好
     for i in range(5):
@@ -66,7 +66,7 @@ def test_alex_case():
     if os.path.exists("data/memory.json"):
         os.remove("data/memory.json")
 
-    memory = get_memory()
+    memory = MemoryManager()
     memory._entries = []  # 清空内存
 
     # Alex 的 5 次经济型酒店选择
@@ -93,7 +93,7 @@ def test_profile():
     print("测试 4: 用户画像")
     print("=" * 60)
 
-    memory = get_memory()
+    memory = MemoryManager()
     profile = memory.get_profile()
 
     import json

@@ -11,7 +11,7 @@ sys.path.insert(0, ".")
 
 from app.graph.builder import build_trip_graph
 from app.graph.nodes import memory_node, planner_node
-from app.memory.manager import get_memory
+from app.memory.manager import MemoryManager
 
 
 def test_node_count():
@@ -85,7 +85,7 @@ def test_planner_profile_injection():
     print("=" * 60)
 
     # 模拟 profile（直接从 memory 获取，与 memory_node 一致）
-    memory = get_memory()
+    memory = MemoryManager()
     profile = memory.get_profile()
 
     # 模拟 planner_node 构造 profile_text 的逻辑
