@@ -126,13 +126,19 @@ class TravelAgentHarness:
 
                 ordered_attrs = []
                 if hasattr(route_res, "route") and route_res.route:
-                    poi_map = {p["name"]: p for p in day_pois}
+                    poi_map = {p.get("name", ""): p for p in day_pois if isinstance(p, dict)}
                     for node in route_res.route:
-                        n_name = node.get("name", "")
-                        orig = dict(poi_map.get(n_name) or node)
+                        inner_poi = node.get("poi") or {}
+                        n_name = node.get("name") or inner_poi.get("name", "")
+                        orig = dict(poi_map.get(n_name) or inner_poi or node)
+                        orig["name"] = n_name or orig.get("name", "精选景点")
                         orig["arrive_time"] = node.get("arrive_time", "09:00")
                         orig["depart_time"] = node.get("depart_time", "11:00")
                         orig["distance_km"] = round(float(node.get("distance_km") or 0.0), 1)
+                        if "lng" not in orig and "lng" in inner_poi:
+                            orig["lng"] = inner_poi["lng"]
+                        if "lat" not in orig and "lat" in inner_poi:
+                            orig["lat"] = inner_poi["lat"]
                         ordered_attrs.append(orig)
                 else:
                     ordered_attrs = day_pois

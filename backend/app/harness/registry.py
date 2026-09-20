@@ -61,6 +61,12 @@ class ToolRegistry:
             raise KeyError(f"Tool {name} 未在注册中心注册")
         return await tool.execute(**kwargs)
 
+    def list_tools(self) -> list[dict[str, str]]:
+        return [
+            {"name": t.name, "description": t.description}
+            for t in self._registry.values()
+        ]
+
 
 # 实例化标准 Travel 工具中心
 travel_tools = ToolRegistry()

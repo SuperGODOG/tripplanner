@@ -646,9 +646,10 @@ def enrich_meals_tool(
         if not attrs:
             continue
         a = attrs[0]
+        inner = a.get("poi", {}) if isinstance(a.get("poi"), dict) else {}
         loc = a.get("location", {}) if isinstance(a.get("location"), dict) else {}
-        lng = loc.get("longitude") or loc.get("lng") or a.get("lng")
-        lat = loc.get("latitude") or loc.get("lat") or a.get("lat")
+        lng = loc.get("longitude") or loc.get("lng") or a.get("lng") or inner.get("lng")
+        lat = loc.get("latitude") or loc.get("lat") or a.get("lat") or inner.get("lat")
         if not lng or not lat:
             continue
 
