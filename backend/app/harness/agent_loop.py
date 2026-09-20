@@ -29,7 +29,7 @@ from .events import (
 from .invariants import TravelInvariants
 from .registry import ToolRegistry, travel_tools
 from .session_store import harness_session_store
-from ..agents.clarification_agent import extract_slots_from_input
+from ..agents.clarification_agent import extract_slots_from_input, check_clarification_needed
 from ..models.session import EffectiveRequirements, SlotOrigin
 from ..services.poi_synthesizer import synthesize_city_pois
 
@@ -63,6 +63,9 @@ class TravelAgentHarness:
                 except Exception:
                     pass
 
+        # 0. 阶段通知
+        yield ThinkingEvent(step="clarification", detail="正在解析出行意图、天数与偏好约束...")
+
         # 1. 意图与槽位解析 (严格解耦景点偏好与美食偏好)
         req = extract_slots_from_input(user_input, current_requirements)
 
@@ -72,56 +75,34 @@ class TravelAgentHarness:
             v = action_payload.get("value")
             if k and v is not None:
                 req.set_slot(k, v, origin=SlotOrigin.USER_EXPLICIT)
-            if "days" in action_payload and k != "days":
-                req.set_slot("days", action_payload["days"], origin=SlotOrigin.USER_EXPLICIT)
+            for extra_key in ("days", "city", "start_date"):
+                if extra_key in action_payload and extra_key != k:
+                    req.set_slot(extra_key, action_payload[extra_key], origin=SlotOrigin.USER_EXPLICIT)
 
-        city = req.get_slot_value("city")
-        days = req.get_slot_value("days")
-
-        # ── 主动澄清拦截：核心槽位缺失时不盲目粗暴规划 ──
-        if not city and not days:
+        # ── 主动澄清拦截：使用标准 check_clarification_needed 评估核心槽位完备性 ──
+        clar_prompt = check_clarification_needed(req)
+        if clar_prompt:
             clar_event = ClarificationEvent(
-                prompt_text="请问您计划前往哪座城市？打算玩几天？",
-                options=[
-                    {"option_id": "opt_bj", "label": "北京 3天 (古都中轴与名胜)", "payload": {"key": "city", "value": "北京", "days": 3}},
-                    {"option_id": "opt_cd", "label": "成都 3天 (天府文化与美食)", "payload": {"key": "city", "value": "成都", "days": 3}},
-                    {"option_id": "opt_xa", "label": "西安 2天 (秦汉唐历史古韵)", "payload": {"key": "city", "value": "西安", "days": 2}},
-                    {"option_id": "opt_sh", "label": "上海 2天 (魔都外滩经典行)", "payload": {"key": "city", "value": "上海", "days": 2}},
-                ],
-                slot_key="city",
+                prompt_text=clar_prompt.prompt_text,
+                options=[opt.model_dump() for opt in clar_prompt.options],
+                slot_key=clar_prompt.missing_slots[0] if clar_prompt.missing_slots else "",
+                missing_slots=clar_prompt.missing_slots,
+                allow_custom_input=clar_prompt.allow_custom_input,
+                can_use_default=clar_prompt.can_use_default,
             )
             yield clar_event
             harness_session_store.update(
                 session_id=session_id,
                 requirements=req,
+                locked_items=list(req.locked_items or []),
                 pending_clarification=clar_event.payload,
                 new_user_message=user_input,
             )
-            yield TurnCompleteEvent(session_id=session_id, success=True)
+            yield TurnCompleteEvent(session_id=session_id, success=True, status="waiting_clarification")
             return
 
-        if not days:
-            clar_event = ClarificationEvent(
-                prompt_text=f"已确认目的地【{city}】，请问您计划游玩几天？",
-                options=[
-                    {"option_id": "opt_d2", "label": "2天 (周末快闪 / 经典打卡)", "payload": {"key": "days", "value": 2}},
-                    {"option_id": "opt_d3", "label": "3天 (适度漫游 / 深度体验)", "payload": {"key": "days", "value": 3}},
-                    {"option_id": "opt_d5", "label": "5天 (全景探索 / 周边全包)", "payload": {"key": "days", "value": 5}},
-                ],
-                slot_key="days",
-            )
-            yield clar_event
-            harness_session_store.update(
-                session_id=session_id,
-                requirements=req,
-                pending_clarification=clar_event.payload,
-                new_user_message=user_input,
-            )
-            yield TurnCompleteEvent(session_id=session_id, success=True)
-            return
-
-        city = str(city)
-        days = int(days)
+        city = str(req.get_slot_value("city", "北京"))
+        days = int(req.get_slot_value("days", 3))
         budget_total = req.get_slot_value("budget_total")
         locked_items = list(req.locked_items or [])
 
@@ -231,6 +212,7 @@ class TravelAgentHarness:
                 "version_id": turn,
                 "city": city,
                 "days": enriched_days or plan_days,
+                "locked_items": locked_items,
                 "algorithm_telemetry": {
                     "kmeans": {"total_pois": len(candidate_pool), "days": days, "balanced": True},
                     "minimax_hotel": {"hotel_name": hotel_selected.get("name")},

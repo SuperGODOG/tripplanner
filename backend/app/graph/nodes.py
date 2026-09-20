@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Optional
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import Send
 
 from .state import TripPlannerState
@@ -31,7 +32,7 @@ from ..tools.search_tools import (
 )
 
 
-def _emit(config: dict | None, node: str, status: str, data: dict | None = None) -> None:
+def _emit(config: RunnableConfig | dict | None, node: str, status: str, data: dict | None = None) -> None:
     sink = event_sink_from_config(config)
     if sink:
         sink.emit(node, status, data)
@@ -89,7 +90,7 @@ def _format_hotels(cands: list) -> str:
 # Node 1: 景点检索（确定性，多偏好并行召回）
 # ================================================================
 
-def attraction_node(state: TripPlannerState, config: dict | None = None) -> dict:
+def attraction_node(state: TripPlannerState, config: Optional[RunnableConfig] = None) -> dict:
     _emit(config, "attraction", "start")
     city = state["city"]
     prefs = state.get("preferences", []) or []
@@ -168,7 +169,7 @@ def _select_hotel(cands: list, state: TripPlannerState) -> dict:
     return select_hotel_minimax(cands, pois, acc)
 
 
-def hotel_node(state: TripPlannerState, config: dict | None = None) -> dict:
+def hotel_node(state: TripPlannerState, config: Optional[RunnableConfig] = None) -> dict:
     _emit(config, "hotel", "start")
     city = state["city"]
     try:
@@ -209,7 +210,7 @@ def hotel_node(state: TripPlannerState, config: dict | None = None) -> dict:
 # Node 3: 记忆读取（租户隔离，纯本地）
 # ================================================================
 
-def memory_node(state: TripPlannerState, config: dict | None = None) -> dict:
+def memory_node(state: TripPlannerState, config: Optional[RunnableConfig] = None) -> dict:
     _emit(config, "memory", "start")
     from ..memory.repository import get_memory_repository
     try:
@@ -457,7 +458,7 @@ def _format_day_prompt(idx: int, date: str, kind: str, attractions: list,
     return "\n".join(lines)
 
 
-def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
+def day_node(state: TripPlannerState, config: Optional[RunnableConfig] = None) -> dict:
     """单日计划节点（Send 并行实例，每天一次 LLM 文案调用）。"""
     idx = state.get("day_index", 0)
     kind = state.get("day_kind", "normal")
@@ -613,7 +614,7 @@ def _compute_budget(days: list[dict], state: TripPlannerState) -> dict:
     }
 
 
-def merge_node(state: TripPlannerState, config: dict | None = None) -> dict:
+def merge_node(state: TripPlannerState, config: Optional[RunnableConfig] = None) -> dict:
     """聚合节点: 排序 → 填充 → 校验 → final_plan。"""
     city = state.get("city", "")
     days = sorted(state.get("plan_days", []), key=lambda d: d.get("day_index", 0))

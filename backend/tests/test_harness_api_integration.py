@@ -74,7 +74,7 @@ def test_harness_stream_endpoint_flow():
             json={
                 "session_id": "test_session_sse",
                 "user_id": "tester_1",
-                "input_text": "想去成都玩1天，喜欢历史文化和火锅",
+                "input_text": "2026-09-21想去成都玩1天，喜欢历史文化和火锅",
             },
         )
         assert resp.status_code == 200

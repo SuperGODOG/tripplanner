@@ -118,7 +118,7 @@ async def test_travel_harness_loop_stream():
     harness = TravelAgentHarness(registry=mock_reg)
 
     events: list[HarnessEvent] = []
-    async for ev in harness.run("session_test_123", "去成都玩1天"):
+    async for ev in harness.run("session_test_123", "2026-09-21去成都玩1天"):
         events.append(ev)
 
     event_types = [e.event_type for e in events]

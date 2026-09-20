@@ -70,13 +70,25 @@ class InvariantViolationEvent(HarnessEvent):
 @dataclass
 class ClarificationEvent(HarnessEvent):
     """未决槽位主动交互澄清事件（前端渲染选择卡片）"""
-    def __init__(self, prompt_text: str, options: list[dict[str, Any]], slot_key: str = ""):
+    def __init__(
+        self,
+        prompt_text: str,
+        options: list[dict[str, Any]],
+        slot_key: str = "",
+        missing_slots: list[str] | None = None,
+        allow_custom_input: bool = True,
+        can_use_default: bool = True,
+    ):
+        m_slots = missing_slots or ([slot_key] if slot_key else [])
         super().__init__(
             event_type="clarification",
             payload={
                 "prompt_text": prompt_text,
                 "options": options,
-                "slot_key": slot_key,
+                "slot_key": slot_key or (m_slots[0] if m_slots else ""),
+                "missing_slots": m_slots,
+                "allow_custom_input": allow_custom_input,
+                "can_use_default": can_use_default,
             }
         )
 
@@ -104,8 +116,8 @@ class MessageDeltaEvent(HarnessEvent):
 @dataclass
 class TurnCompleteEvent(HarnessEvent):
     """单轮任务完整结束事件"""
-    def __init__(self, session_id: str, success: bool = True):
+    def __init__(self, session_id: str, success: bool = True, status: str = "completed"):
         super().__init__(
             event_type="done",
-            payload={"session_id": session_id, "success": success}
+            payload={"session_id": session_id, "success": success, "status": status}
         )

@@ -20,7 +20,7 @@ async def test_harness_clarification_on_missing_city_and_days():
     # 验证第一阶段包含了澄清事件
     clar_events = [e for e in events if isinstance(e, ClarificationEvent)]
     assert len(clar_events) == 1
-    assert "请问您计划前往哪座城市" in clar_events[0].payload["prompt_text"]
+    assert "哪座城市" in clar_events[0].payload["prompt_text"]
     assert len(clar_events[0].payload["options"]) >= 3
 
     # 验证本轮任务正常挂起结束
@@ -58,7 +58,7 @@ async def test_harness_resume_via_action_payload():
         session_id="test_clar_sess_3",
         user_input="",
         action_type="SET_SLOT",
-        action_payload={"key": "city", "value": "北京", "days": 2},
+        action_payload={"key": "city", "value": "北京", "days": 2, "start_date": "2026-09-21"},
     ):
         events.append(ev)
 

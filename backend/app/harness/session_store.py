@@ -101,22 +101,43 @@ class HarnessSessionStore:
             return snapshot
 
     def to_frontend_state(self, session_id: str) -> dict[str, Any]:
-        """输出与前端 App.vue fetchSessionState() 100% 契合的三轨状态结构"""
-        snapshot = self.get(session_id)
-        slots = snapshot.effective_requirements.get("slots", {}) if snapshot.effective_requirements else {}
-        return {
-            "session_id": snapshot.session_id,
-            "effective_requirements": {
+        """输出与前端 App.vue fetchSessionState() 及测试 100% 契合的三轨状态结构"""
+        with self._lock:
+            if session_id not in self._store:
+                return {
+                    "session_id": session_id,
+                    "user_id": "default_user",
+                    "status": "new",
+                    "requirements": {},
+                    "effective_requirements": {},
+                    "current_plan": None,
+                    "locked_items": [],
+                    "messages": [],
+                    "pending_clarification": None,
+                    "attempted_actions": [],
+                    "revision_id": 1,
+                }
+            snapshot = self._store[session_id]
+            slots = snapshot.effective_requirements.get("slots", {}) if snapshot.effective_requirements else {}
+            req_data = {
                 "slots": slots,
                 "locked_items": snapshot.locked_items,
                 "revision_id": 1,
-            },
-            "current_plan": snapshot.current_plan,
-            "locked_items": snapshot.locked_items,
-            "pending_clarification": snapshot.pending_clarification,
-            "messages": snapshot.messages,
-            "revision_id": 1,
-        }
+            }
+            status = "waiting_clarification" if snapshot.pending_clarification else ("ready" if snapshot.current_plan else "new")
+            return {
+                "session_id": snapshot.session_id,
+                "user_id": snapshot.user_id,
+                "status": status,
+                "requirements": req_data,
+                "effective_requirements": req_data,
+                "current_plan": snapshot.current_plan,
+                "locked_items": snapshot.locked_items,
+                "pending_clarification": snapshot.pending_clarification,
+                "messages": snapshot.messages,
+                "attempted_actions": [],
+                "revision_id": 1,
+            }
 
 
 # 全局共享单例

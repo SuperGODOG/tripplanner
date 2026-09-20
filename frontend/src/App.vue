@@ -30,13 +30,13 @@
               :class="['btn-engine', selectedEngine === 'harness' ? 'active' : '']"
               @click="selectedEngine = 'harness'"
             >
-              ⚡ Harness 极速 (2.4s)
+              ⚡ Harness 原生引擎 (0.75s 极速)
             </button>
             <button
               :class="['btn-engine', selectedEngine === 'langgraph' ? 'active' : '']"
               @click="selectedEngine = 'langgraph'"
             >
-              🌐 LangGraph 稳定版
+              🌐 LangGraph (Legacy 对照)
             </button>
           </div>
 
@@ -599,19 +599,14 @@ async function sendChatRequest(text, actionPayload = null) {
 
   try {
     const isHarness = selectedEngine.value === 'harness'
-    const endpoint = isHarness ? '/api/harness/stream' : '/api/session/chat'
-    const payload = isHarness
-      ? {
-          session_id: sessionId.value,
-          input_text: text || '',
-          requirements: effectiveRequirements.value?.slots || null,
-        }
-      : {
-          session_id: sessionId.value,
-          input_text: text || '',
-          action_type: actionPayload ? 'SET_SLOT' : null,
-          action_payload: actionPayload,
-        }
+    const endpoint = '/api/session/chat'
+    const payload = {
+      session_id: sessionId.value,
+      input_text: text || '',
+      action_type: actionPayload ? 'SET_SLOT' : null,
+      action_payload: actionPayload,
+      engine: isHarness ? 'harness' : 'langgraph',
+    }
 
     const res = await fetch(endpoint, {
       method: 'POST',
