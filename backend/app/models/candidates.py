@@ -24,7 +24,14 @@ class PoiCandidate(BaseModel):
     address: str = ""
     district: str = ""          # 区县（adname）
     category: str = ""          # 景点类别
+    typecode: str = ""          # 高德分类编码 (如 110202, 141200)
     price: float | None = None  # 参考价（门票/人均），高德提供则填
+    rating: float | str | None = None  # 高德真实评分 (如 4.5)
+    open_time: str = ""         # 官方营业时间 (如 "06:00-18:00")
+    business_area: str = ""     # 所属商圈或景区板块 (如 "峨眉山-金顶")
+    level: str = ""             # 景区等级 (如 "AAAAA")
+    tel: str = ""               # 官方联系电话
+    recommended_reason: str = ""       # 招牌菜品或特色理由
     source: str = "amap"        # 数据来源
     id: str = Field(default="", description="稳定 ID，构造时自动生成")
 

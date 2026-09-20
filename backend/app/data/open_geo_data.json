@@ -1,0 +1,75 @@
+{
+  "乐山": {
+    "center": [103.761, 29.582],
+    "pois": [
+      {"name": "乐山大佛", "lng": 103.771, "lat": 29.553, "visit_minutes": 180, "price": 80, "category": "历史名胜", "district": "市中区"},
+      {"name": "峨眉山金顶", "lng": 103.337, "lat": 29.526, "visit_minutes": 240, "price": 160, "category": "名山胜景", "district": "峨眉山市"},
+      {"name": "峨眉山万年寺", "lng": 103.385, "lat": 29.582, "visit_minutes": 120, "price": 10, "category": "宗教古刹", "district": "峨眉山市"},
+      {"name": "峨眉山清音阁", "lng": 103.417, "lat": 29.574, "visit_minutes": 120, "price": 0, "category": "自然山水", "district": "峨眉山市"},
+      {"name": "报国寺", "lng": 103.443, "lat": 29.571, "visit_minutes": 90, "price": 8, "category": "古刹寺庙", "district": "峨眉山市"},
+      {"name": "苏稽古镇(翘脚牛肉发源地)", "lng": 103.655, "lat": 29.566, "visit_minutes": 120, "price": 0, "category": "特色美食街区", "district": "市中区"},
+      {"name": "张公桥美食街", "lng": 103.754, "lat": 29.585, "visit_minutes": 90, "price": 0, "category": "地道小吃夜市", "district": "市中区"},
+      {"name": "嘉州古城墙与上中顺特色街区", "lng": 103.766, "lat": 29.565, "visit_minutes": 90, "price": 0, "category": "人文老街", "district": "市中区"}
+    ]
+  },
+  "峨眉山": {
+    "center": [103.337, 29.526],
+    "pois": [
+      {"name": "峨眉山金顶", "lng": 103.337, "lat": 29.526, "visit_minutes": 240, "price": 160, "category": "名山胜景", "district": "峨眉山市"},
+      {"name": "峨眉山万年寺", "lng": 103.385, "lat": 29.582, "visit_minutes": 120, "price": 10, "category": "宗教古刹", "district": "峨眉山市"},
+      {"name": "峨眉山清音阁", "lng": 103.417, "lat": 29.574, "visit_minutes": 120, "price": 0, "category": "自然山水", "district": "峨眉山市"},
+      {"name": "报国寺", "lng": 103.443, "lat": 29.571, "visit_minutes": 90, "price": 8, "category": "古刹寺庙", "district": "峨眉山市"},
+      {"name": "乐山大佛", "lng": 103.771, "lat": 29.553, "visit_minutes": 180, "price": 80, "category": "历史名胜", "district": "市中区"},
+      {"name": "峨眉山雷洞坪", "lng": 103.342, "lat": 29.539, "visit_minutes": 120, "price": 0, "category": "高山风光", "district": "峨眉山市"},
+      {"name": "苏稽古镇(翘脚牛肉发源地)", "lng": 103.655, "lat": 29.566, "visit_minutes": 120, "price": 0, "category": "特色美食街区", "district": "市中区"},
+      {"name": "峨眉山红珠山温泉", "lng": 103.446, "lat": 29.568, "visit_minutes": 150, "price": 138, "category": "休闲温泉", "district": "峨眉山市"}
+    ]
+  },
+  "北京": {
+    "center": [116.397, 39.908],
+    "pois": [
+      {"name": "故宫博物院", "lng": 116.397, "lat": 39.916, "visit_minutes": 180, "price": 60, "category": "世界遗产", "district": "东城区"},
+      {"name": "天安门广场", "lng": 116.397, "lat": 39.908, "visit_minutes": 60, "price": 0, "category": "地标广场", "district": "东城区"},
+      {"name": "景山公园", "lng": 116.396, "lat": 39.924, "visit_minutes": 60, "price": 2, "category": "城市公园", "district": "西城区"},
+      {"name": "颐和园", "lng": 116.273, "lat": 39.999, "visit_minutes": 180, "price": 30, "category": "皇家园林", "district": "海淀区"},
+      {"name": "圆明园", "lng": 116.298, "lat": 40.008, "visit_minutes": 120, "price": 25, "category": "历史遗址", "district": "海淀区"},
+      {"name": "天坛公园", "lng": 116.411, "lat": 39.882, "visit_minutes": 120, "price": 15, "category": "历史古迹", "district": "东城区"},
+      {"name": "八达岭长城", "lng": 116.016, "lat": 40.359, "visit_minutes": 240, "price": 40, "category": "名胜古迹", "district": "延庆区"},
+      {"name": "南锣鼓巷", "lng": 116.403, "lat": 39.939, "visit_minutes": 90, "price": 0, "category": "文化街区", "district": "东城区"}
+    ]
+  },
+  "成都": {
+    "center": [104.066, 30.572],
+    "pois": [
+      {"name": "成都大熊猫繁育研究基地", "lng": 104.144, "lat": 30.738, "visit_minutes": 200, "price": 55, "category": "动植物园", "district": "成华区"},
+      {"name": "杜甫草堂", "lng": 104.028, "lat": 30.660, "visit_minutes": 120, "price": 50, "category": "历史名人", "district": "青羊区"},
+      {"name": "武侯祠", "lng": 104.048, "lat": 30.646, "visit_minutes": 120, "price": 50, "category": "三国文化", "district": "武侯区"},
+      {"name": "锦里古街", "lng": 104.049, "lat": 30.648, "visit_minutes": 90, "price": 0, "category": "特色小吃街", "district": "武侯区"},
+      {"name": "宽窄巷子", "lng": 104.053, "lat": 30.663, "visit_minutes": 120, "price": 0, "category": "民俗街区", "district": "青羊区"},
+      {"name": "春熙路太古里", "lng": 104.081, "lat": 30.654, "visit_minutes": 120, "price": 0, "category": "时尚商圈", "district": "锦江区"},
+      {"name": "金沙遗址博物馆", "lng": 104.012, "lat": 30.682, "visit_minutes": 150, "price": 70, "category": "考古遗址", "district": "青羊区"},
+      {"name": "青羊宫", "lng": 104.039, "lat": 30.660, "visit_minutes": 60, "price": 10, "category": "道教古观", "district": "青羊区"}
+    ]
+  },
+  "西安": {
+    "center": [108.939, 34.341],
+    "pois": [
+      {"name": "秦始皇帝陵博物院(兵马俑)", "lng": 109.278, "lat": 34.384, "visit_minutes": 240, "price": 120, "category": "世界奇迹", "district": "临潼区"},
+      {"name": "西安城墙", "lng": 108.940, "lat": 34.257, "visit_minutes": 120, "price": 54, "category": "古城遗迹", "district": "碑林区"},
+      {"name": "陕西历史博物馆", "lng": 108.954, "lat": 34.225, "visit_minutes": 180, "price": 0, "category": "文博场馆", "district": "雁塔区"},
+      {"name": "大雁塔·大唐不夜城", "lng": 108.964, "lat": 34.218, "visit_minutes": 150, "price": 0, "category": "文化景区", "district": "雁塔区"},
+      {"name": "回民街", "lng": 108.938, "lat": 34.263, "visit_minutes": 90, "price": 0, "category": "特色美食街区", "district": "莲湖区"},
+      {"name": "钟鼓楼广场", "lng": 108.942, "lat": 34.259, "visit_minutes": 60, "price": 30, "category": "历史建筑", "district": "碑林区"}
+    ]
+  },
+  "杭州": {
+    "center": [120.155, 30.274],
+    "pois": [
+      {"name": "西湖风景名胜区", "lng": 120.144, "lat": 30.242, "visit_minutes": 240, "price": 0, "category": "湖泊名胜", "district": "西湖区"},
+      {"name": "灵隐寺·飞来峰", "lng": 120.101, "lat": 30.241, "visit_minutes": 180, "price": 75, "category": "佛教名寺", "district": "西湖区"},
+      {"name": "西溪国家湿地公园", "lng": 120.065, "lat": 30.268, "visit_minutes": 180, "price": 80, "category": "湿地生态", "district": "西湖区"},
+      {"name": "宋城", "lng": 120.106, "lat": 30.177, "visit_minutes": 200, "price": 320, "category": "主题乐园", "district": "西湖区"},
+      {"name": "清河坊街", "lng": 120.169, "lat": 30.240, "visit_minutes": 90, "price": 0, "category": "历史古街", "district": "上城区"}
+    ]
+  }
+}

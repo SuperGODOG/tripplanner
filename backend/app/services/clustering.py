@@ -98,14 +98,45 @@ def cluster_pois_by_day(pois: list[dict], days: int,
             if not changed:
                 break
 
+        # ── 容量均衡二次平衡 (Balanced K-Means) ──
+        # 确保各日景点数量严格均匀分布（极差 <= 1），彻底杜绝单日堆叠与次日稀疏
+        for _ in range(20):
+            counts = [assign.count(c) for c in range(k)]
+            max_cnt = max(counts)
+            min_cnt = min(counts)
+            if max_cnt - min_cnt <= 1:
+                break
+            src_c = counts.index(max_cnt)
+            dst_c = counts.index(min_cnt)
+            src_indices = [i for i in range(len(normal)) if assign[i] == src_c]
+            best_idx, min_penalty = None, float("inf")
+            for i in src_indices:
+                p = normal[i]
+                d_curr = _haversine_km(p["lng"], p["lat"], centers[src_c]["lng"], centers[src_c]["lat"])
+                d_dst = _haversine_km(p["lng"], p["lat"], centers[dst_c]["lng"], centers[dst_c]["lat"])
+                penalty = d_dst - d_curr
+                if penalty < min_penalty:
+                    min_penalty, best_idx = penalty, i
+            if best_idx is not None:
+                assign[best_idx] = dst_c
+
         for c in range(k):
             members = [normal[i] for i in range(len(normal)) if assign[i] == c]
             if members:
-                clusters.append({"day_index": None, "pois": members, "kind": "normal"})
+                c_lng = sum(m["lng"] for m in members) / len(members)
+                c_lat = sum(m["lat"] for m in members) / len(members)
+                avg_r = sum(_haversine_km(c_lng, c_lat, m["lng"], m["lat"]) for m in members) / len(members)
+                clusters.append({
+                    "day_index": None,
+                    "pois": members,
+                    "kind": "normal",
+                    "centroid": {"lng": round(c_lng, 4), "lat": round(c_lat, 4)},
+                    "avg_radius_km": round(avg_r, 2),
+                })
 
     # ── 3. 自由日补位: 簇数 < days 时，剩余天生成 leisure 簇 ──
     while len(clusters) < days:
-        clusters.append({"day_index": None, "pois": [], "kind": LEISURE})
+        clusters.append({"day_index": None, "pois": [], "kind": LEISURE, "centroid": None, "avg_radius_km": 0.0})
 
     # ── 4. 分配 day_index（市区簇优先占前段，excursion 占后，leisure 填空位）──
     # 排序: normal 簇按质心经度（近似行程方向），excursion 在最后，leisure 按空位

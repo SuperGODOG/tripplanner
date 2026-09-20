@@ -1,12 +1,12 @@
-"""高德地图 MCP 服务封装"""
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 from functools import lru_cache
 from typing import Any
-from hello_agents.tools import MCPTool
 from ..config import get_settings
+from .amap_native import AmapNativeTool
 
-_amap_mcp_tool: MCPTool | None = None
+_amap_mcp_tool: Any = None
 
 # ── 全局 MCP 并发闸（2026-08-21 优化）────────────────────────────
 # 所有高德 MCP 调用（POI 搜索 / 坐标增强 / 天气 / 城际交通）统一经
@@ -38,18 +38,26 @@ def run_mcp(args: dict, timeout: int = 10) -> Any:
         return {"error": "MCP timeout"}
 
 
-@lru_cache(maxsize=256)
-def geo_cached(address: str) -> tuple[float, float] | None:
+@lru_cache(maxsize=512)
+def geo_cached(address: str, city: str = "") -> tuple[float, float] | None:
     """maps_geo 结果缓存（内存 LRU，最简单形态）。
 
     城市中心 / POI 坐标增强 / 城际地理编码三处共用。
-    高德 POI 坐标几乎不变，同一地址反复查询直接命中。
-    失败（None）也会被缓存——失败地址再次出现的概率低，可接受。
+    若传入 city 且 address 中未包含，强制前置城市名，彻底杜绝全国重名地址漂移至外省。
     """
     try:
+        clean_addr = address.strip()
+        if city and city not in clean_addr:
+            query_addr = f"{city} {clean_addr}".strip()
+        else:
+            query_addr = clean_addr
+
+        args: dict[str, Any] = {"address": query_addr}
+        if city:
+            args["city"] = city.strip()
         r = str(run_mcp({
             "action": "call_tool", "tool_name": "maps_geo",
-            "arguments": {"address": address},
+            "arguments": args,
         }))
         m = re.search(r'"location"\s*:\s*"([\d.]+),([\d.]+)"', r)
         if m:
@@ -59,12 +67,11 @@ def geo_cached(address: str) -> tuple[float, float] | None:
     return None
 
 
-def get_amap_mcp_tool() -> MCPTool:
-    """获取高德地图 MCP 工具实例（单例模式）
+def get_amap_mcp_tool() -> Any:
+    """获取高德地图工具实例（单例模式）
 
-    只创建一个 MCPTool 实例，所有 Agent 共享。
-    每个 MCPTool 启动一个 amap-mcp-server 子进程（约 500ms 握手），
-    共用避免重复建连。
+    默认优先采用原生进程内连接池工具 AmapNativeTool（0 外部子进程、毫秒级响应、零发热）；
+    若设置环境变量 AMAP_USE_LEGACY_MCP=true，则降级使用外部 uvx amap-mcp-server 子进程。
     """
     global _amap_mcp_tool
 
@@ -77,12 +84,16 @@ def get_amap_mcp_tool() -> MCPTool:
                 "申请地址: https://console.amap.com/dev/key/app"
             )
 
-        _amap_mcp_tool = MCPTool(
-            name="amap",
-            description="高德地图服务，支持 POI 搜索、路线规划、天气查询",
-            server_command=["uvx", "amap-mcp-server"],
-            env={"AMAP_MAPS_API_KEY": settings.amap_api_key},
-            auto_expand=True,
-        )
+        if os.environ.get("AMAP_USE_LEGACY_MCP", "").lower() in ("true", "1"):
+            from hello_agents.tools import MCPTool
+            _amap_mcp_tool = MCPTool(
+                name="amap",
+                description="高德地图服务，支持 POI 搜索、路线规划、天气查询",
+                server_command=["uvx", "amap-mcp-server"],
+                env={"AMAP_MAPS_API_KEY": settings.amap_api_key},
+                auto_expand=True,
+            )
+        else:
+            _amap_mcp_tool = AmapNativeTool(settings.amap_api_key)
 
     return _amap_mcp_tool

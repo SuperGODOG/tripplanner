@@ -1,22 +1,14 @@
-"""LangGraph Node 函数 — 确定性检索节点 + v3 分日并发（Send API）
+"""LangGraph Node 函数 — 确定性检索节点 + v3 分日并发（Send API）架构 Facade
 
-2026-08-21 v3 重构（多日并发拓扑）:
-- attraction_node 检索后做 K-Means 聚簇分天（数据层互斥，LLM 不再全局去重）
-- hotel_node 本地选定全程酒店（市区质心最近，确定性）
-- _fan_out: Send API 按天动态分发 day_node（原生并行，汇聚只触发 1 次，实测）
-- day_node: 本地路径求解（贪心+2-opt+时间窗）+ 单天文案 LLM（JSON mode）
-- merge_node: 聚合 + 天气本地解析 + 三餐填充 + 本地预算 + 校验 → final_plan
-- 全链路韧性: 单天文案 LLM 失败 → 本地模板兜底，不阻断整个计划
-
-历史（2026-08 之前）: attraction/hotel 曾为 LLM 转发伪 Agent，v2 改为确定性检索，
-单次 planner 生成全部天；v3 拆为分日并行。坐标溯源函数已删除——v3 景点坐标
-全部本地组装（候选直出），LLM 不再输出坐标，幻觉源在结构上消除。
+重构说明:
+- 剥离高德地图检索、Minimax 酒店选址与三餐富化至独立工具集 app.tools.search_tools
+- 接入确定性规划工具集 app.tools.planning_tools（K-Means 聚类、路径求解与指纹缓存）
+- 保持所有节点与模块级函数签名完全不变，兼容现有 60+ 单元测试与 Monkeypatch 注入
 """
-import math
-import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from __future__ import annotations
 
+import re
+from typing import Any
 from langgraph.types import Send
 
 from .state import TripPlannerState
@@ -24,8 +16,19 @@ from .context import event_sink_from_config
 from ..agents.trip_planner_agent import get_planner
 from ..tools.amap_wrapper import AmapToolWrapper
 from ..services.amap_service import geo_cached
-from ..services.clustering import LEISURE, EXCURSION, cluster_pois_by_day
-from ..services.route_solver import solve_daily_route, format_plan
+from ..services.clustering import LEISURE, EXCURSION
+from ..services.route_solver import format_plan
+from ..tools.planning_tools import cluster_pois_tool, solve_day_route_tool
+from ..tools.search_tools import (
+    haversine_km,
+    format_attractions_prompt_text,
+    format_hotels_prompt_text,
+    search_attractions_tool,
+    categorize_excursions,
+    select_hotel_minimax,
+    search_hotel_minimax_tool,
+    enrich_meals_tool,
+)
 
 
 def _emit(config: dict | None, node: str, status: str, data: dict | None = None) -> None:
@@ -41,7 +44,7 @@ MAX_HOTEL_DIST_KM = 10       # 酒店到最远景点距离阈值（软伤）
 BUDGET_OVER_PCT = 0.3        # 预算超用户偏好 30%（硬伤）
 
 
-# ── 确定性检索单例 ──
+# ── 确定性检索单例（保留供测试 monkeypatch 依赖）──
 _amap_wrapper: AmapToolWrapper | None = None
 
 
@@ -53,14 +56,13 @@ def _get_amap_wrapper() -> AmapToolWrapper:
 
 
 # ================================================================
-# 工具函数
+# 工具函数（保持模块级暴露以兼容现有单元测试 monkeypatch）
 # ================================================================
 
 def _city_center(city: str) -> tuple[str, str] | None:
     """maps_geo 本地调用获取城市中心坐标（不经过 LLM）。
 
-    2026-08-21 优化: 经 geo_cached（内存 LRU + 全局 MCP 池限流），
-    同城市反复请求直接命中缓存。签名保持不变（测试 monkeypatch 依赖）。
+    经 geo_cached 缓存加速。保持函数名以供测试 monkeypatch 依赖。
     """
     coord = geo_cached(city)
     if coord:
@@ -70,56 +72,17 @@ def _city_center(city: str) -> tuple[str, str] | None:
 
 def _haversine_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
     """两点间 Haversine 直线距离 (km)"""
-    R = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlng = math.radians(lng2 - lng1)
-    a = (math.sin(dlat / 2) ** 2 +
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-         math.sin(dlng / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return haversine_km(lng1, lat1, lng2, lat2)
 
 
 def _format_candidates(cands: list, excursions: list | None = None) -> str:
-    """结构化候选 → planner prompt 文本（本地生成，不经 LLM 转发）。"""
-    exc_names = {e["name"] for e in (excursions or [])}
-    lines = ["【景点搜索结果】"]
-    for i, c in enumerate(cands, 1):
-        parts = [f"{i}. {c.name}"]
-        if c.name in exc_names:
-            parts.append("【远郊】")
-        if c.district:
-            parts.append(f"[{c.district}]")
-        if c.address:
-            parts.append(c.address)
-        parts.append(f"({c.lng},{c.lat})")
-        if c.category:
-            parts.append(c.category)
-        if c.price is not None:
-            parts.append(f"参考价¥{c.price:.0f}")
-        lines.append(" | ".join(parts))
-    if not cands:
-        lines.append("无")
-    return "\n".join(lines)
+    """结构化候选 → planner prompt 文本"""
+    return format_attractions_prompt_text(cands, excursions)
 
 
 def _format_hotels(cands: list) -> str:
-    """酒店候选 → planner prompt 文本。"""
-    lines = ["【酒店搜索结果】"]
-    for i, c in enumerate(cands, 1):
-        parts = [f"{i}. {c.name}"]
-        if c.hotel_type:
-            parts.append(c.hotel_type)
-        if c.rating:
-            parts.append(f"评分{c.rating}")
-        if c.price_range:
-            parts.append(c.price_range)
-        if c.address:
-            parts.append(c.address)
-        parts.append(f"({c.lng},{c.lat})")
-        lines.append(" | ".join(parts))
-    if not cands:
-        lines.append("无")
-    return "\n".join(lines)
+    """酒店候选 → planner prompt 文本"""
+    return format_hotels_prompt_text(cands)
 
 
 # ================================================================
@@ -134,70 +97,33 @@ def attraction_node(state: TripPlannerState, config: dict | None = None) -> dict
         wrapper = _get_amap_wrapper()
         center = _city_center(city)
 
-        # ── 多偏好全量召回：每个偏好一个周边搜索，并行执行 ──
-        keywords = [p.strip() for p in prefs if p.strip()] or ["景点"]
-        center_str = f"{center[0]},{center[1]}" if center else ""
-        merged: list = []
-        with ThreadPoolExecutor(max_workers=min(len(keywords), 5)) as pool:
-            futures = {}
-            for kw in keywords:
-                if center_str:
-                    fut = pool.submit(wrapper.search_pois, city, "around", kw, center_str, "20000")
-                else:
-                    fut = pool.submit(wrapper.search_pois, city, "attraction", kw)
-                futures[fut] = kw
-            for fut in as_completed(futures):
-                try:
-                    merged.extend(fut.result())
-                except Exception as e:
-                    print(f"⚠️ [景点搜索] 偏好「{futures[fut]}」失败: {e}")
+        candidates = search_attractions_tool(
+            city=city,
+            preferences=prefs,
+            user_id=state.get("user_id", ""),
+            amap_wrapper=wrapper,
+            city_center=center,
+        )
 
-        # ── 稳定 ID 去重融合 ──
-        seen: dict[str, Any] = {}
-        for p in merged:
-            seen.setdefault(p.id, p)
-        candidates = list(seen.values())
-        candidates.sort(key=lambda c: c.name)
-        if not candidates:
-            raise RuntimeError("未检索到任何景点")
-
-        # ── 远郊标记（本地计算，不交 LLM）──
-        # 判定基准：城市中心（业务语义"距市中心 >80km"）；拿不到则用候选质心
-        coords = [{"name": c.name, "lng": c.lng, "lat": c.lat} for c in candidates]
-        n = len(coords)
-        clng = sum(c["lng"] for c in coords) / n
-        clat = sum(c["lat"] for c in coords) / n
-        base_lng, base_lat = clng, clat
-        if center:
-            try:
-                base_lng, base_lat = float(center[0]), float(center[1])
-            except (ValueError, TypeError):
-                pass
-
-        excursions = []
-        for c in coords:
-            d = _haversine_km(base_lng, base_lat, c["lng"], c["lat"])
-            if d > EXCURSION_KM:
-                excursions.append({"name": c["name"], "dist_km": round(d, 1),
-                                   "lng": c["lng"], "lat": c["lat"]})
+        coords, excursions, urban_cands = categorize_excursions(
+            candidates,
+            center=center,
+            excursion_km=EXCURSION_KM,
+        )
 
         text = _format_candidates(candidates, excursions)
 
-        # ── v3: 聚类分天（K-Means，互斥分配——数据层保证每天景点不重复）──
-        # 注意: 聚类只吃【市区】候选——远郊点已单独进 excursions（远郊日），
-        # 全量传入会导致远郊点同时出现在市区簇和远郊日（重复入簇 bug，2026-08-21 修复）
-        exc_names = {e["name"] for e in excursions}
-        urban_cands = [c for c in candidates if c.name not in exc_names]
-        day_clusters = cluster_pois_by_day(
-            [c.model_dump() for c in urban_cands],
-            state["days"],
-            excursion_pois=excursions,
+        # 聚类分天（K-Means，互斥分配——数据层保证每天景点不重复）
+        day_clusters = cluster_pois_tool(
+            pois=[c.model_dump() if hasattr(c, "model_dump") else c for c in urban_cands],
+            days=state["days"],
+            excursions=excursions,
         )
 
         _emit(config, "attraction", "done", {"status": "success", "count": len(candidates)})
         return {
             "attraction_data": text,
-            "attraction_candidates": [c.model_dump() for c in candidates],
+            "attraction_candidates": [c.model_dump() if hasattr(c, "model_dump") else c for c in candidates],
             "attraction_status": "success",
             "attraction_coords": coords,
             "excursion_pois": excursions,
@@ -205,9 +131,12 @@ def attraction_node(state: TripPlannerState, config: dict | None = None) -> dict
         }
     except Exception as e:
         _emit(config, "attraction", "done", {"status": "failed"})
-        return {"attraction_data": "", "attraction_candidates": [],
-                "attraction_status": "failed",
-                "error_log": [f"景点搜索失败: {str(e)}"]}
+        return {
+            "attraction_data": "",
+            "attraction_candidates": [],
+            "attraction_status": "failed",
+            "error_log": [f"景点搜索失败: {str(e)}"],
+        }
 
 
 # ================================================================
@@ -217,7 +146,7 @@ def attraction_node(state: TripPlannerState, config: dict | None = None) -> dict
 def _hotel_urban_pois(state: TripPlannerState) -> list[dict]:
     """打分用的市区景点集合（远郊/自由日排除）。
 
-    优先取聚类 normal 簇的 POI（与分日链路一致）；聚类缺失时退化全量候选。
+    优先取聚类 normal 簇的 POI；聚类缺失时退化全量候选。
     """
     pois = []
     for c in state.get("day_clusters", []):
@@ -230,31 +159,13 @@ def _hotel_urban_pois(state: TripPlannerState) -> list[dict]:
 
 
 def _select_hotel(cands: list, state: TripPlannerState) -> dict:
-    """本地目标函数选址（v3，替代几何质心——质心离群敏感且无业务语义）。
-
-    评分 = minimax（到所有市区景点的最大距离，Haversine）：保证"最远景点不远"，
-    等价于优化每天从酒店出发的首站通勤（路径起点就是酒店）。
-    远郊点不参与打分（excursion 日"早出晚归"默认长通勤，参与会惩罚所有酒店）。
-    用户住宿偏好（经济型）作为候选池前置过滤，再在池内 minimax。
-    """
+    """本地目标函数选址（minimax 最远景点最小化）。保持函数名以供测试直接调用。"""
     if not cands:
         return {}
     pois = _hotel_urban_pois(state)
     profile = state.get("user_profile", {})
     acc = profile.get("accommodation") or ""
-
-    # 偏好过滤: 经济型用户 → 候选池收敛到经济型（若存在）
-    if "经济型" in acc:
-        econ = [h for h in cands if "经济" in (h.hotel_type or "")]
-        if econ:
-            cands = econ
-
-    if not pois:
-        return cands[0].model_dump()
-
-    best = min(cands, key=lambda h: max(
-        _haversine_km(h.lng, h.lat, p["lng"], p["lat"]) for p in pois))
-    return best.model_dump()
+    return select_hotel_minimax(cands, pois, acc)
 
 
 def hotel_node(state: TripPlannerState, config: dict | None = None) -> dict:
@@ -262,32 +173,36 @@ def hotel_node(state: TripPlannerState, config: dict | None = None) -> dict:
     city = state["city"]
     try:
         wrapper = _get_amap_wrapper()
-        # ── v3: 搜索中心 = 城市中心（高德 geocode，行政中心，稳定不随候选集漂移）
-        # 替代几何质心——质心会被边缘/稀疏点拉偏，导致候选池本身有偏。
-        # 半径放宽到 10km 弥补中心与酒店密集区之间的偏差。
         center = _city_center(city)
-        if center:
-            center_str = f"{center[0]},{center[1]}"
-            print(f"🏨 [酒店搜索] 城市中心 ({center_str}) 周边 10km")
-            cands = wrapper.search_pois(city, "around", "酒店", center_str, "10000")
-        else:
-            print(f"🏨 [酒店搜索] 无城市中心，退化为全城搜索")
-            cands = wrapper.search_pois(city, "hotel", "酒店")
-        text = _format_hotels(cands)
+        pois = _hotel_urban_pois(state)
+        profile = state.get("user_profile", {})
+        acc = profile.get("accommodation") or ""
 
-        # ── v3: 目标函数选址（minimax 通勤），本地确定性，不交 LLM ──
-        hotel_selected = _select_hotel(cands, state)
+        res = search_hotel_minimax_tool(
+            city=city,
+            attraction_coords=pois,
+            accommodation_pref=acc,
+            amap_wrapper=wrapper,
+            city_center=center,
+        )
+        if res.get("hotel_status") == "failed":
+            raise RuntimeError(res.get("error_log", ["未知错误"])[0])
 
-        _emit(config, "hotel", "done", {"status": "success", "count": len(cands)})
-        return {"hotel_data": text,
-                "hotel_candidates": [c.model_dump() for c in cands],
-                "hotel_status": "success",
-                "hotel_selected": hotel_selected}
+        _emit(config, "hotel", "done", {"status": "success", "count": len(res.get("hotel_candidates", []))})
+        return {
+            "hotel_data": res.get("hotel_data", ""),
+            "hotel_candidates": res.get("hotel_candidates", []),
+            "hotel_status": "success",
+            "hotel_selected": res.get("hotel_selected", {}),
+        }
     except Exception as e:
         _emit(config, "hotel", "done", {"status": "failed"})
-        return {"hotel_data": "", "hotel_candidates": [],
-                "hotel_status": "failed",
-                "error_log": [f"酒店搜索失败: {str(e)}"]}
+        return {
+            "hotel_data": "",
+            "hotel_candidates": [],
+            "hotel_status": "failed",
+            "error_log": [f"酒店搜索失败: {str(e)}"],
+        }
 
 
 # ================================================================
@@ -311,11 +226,7 @@ def memory_node(state: TripPlannerState, config: dict | None = None) -> dict:
 # ================================================================
 
 def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
-    """本地校验：硬伤（重试）/ 软伤（警告）→ 路由决策。
-
-    2026-08 重构: 离群检测已移至 attraction_node（excursion 标记），
-    此处不再删除景点、不再触发 retry_hotel 回环。
-    """
+    """本地校验：硬伤（重试）/ 软伤（警告）→ 路由决策。"""
     retry_count = state.get("planner_retry_count", 0)
     profile = state.get("user_profile", {})
     error_log: list[str] = []
@@ -327,7 +238,6 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
         hard_errors.append("plan 缺少 .days 字段")
 
     for d in plan_days:
-        # v3: 自由活动日/远郊日豁免"每天 ≥2 景点"硬伤（聚类边界，非 LLM 失误）
         if d.get("kind") in (LEISURE, EXCURSION):
             continue
         attrs = d.get("attractions", [])
@@ -362,13 +272,13 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
         hlng = hloc.get("longitude") or hloc.get("lng")
         hlat = hloc.get("latitude") or hloc.get("lat")
         if hlng is not None and hlat is not None:
-            max_d = 0
+            max_d = 0.0
             for a in d.get("attractions", []):
                 aloc = a.get("location", {})
                 alng = aloc.get("longitude") or aloc.get("lng")
                 alat = aloc.get("latitude") or aloc.get("lat")
                 if alng is not None and alat is not None:
-                    dist = _haversine_km(hlng, hlat, alng, alat)
+                    dist = haversine_km(float(hlng), float(hlat), float(alng), float(alat))
                     if dist > max_d:
                         max_d = dist
             if max_d > MAX_HOTEL_DIST_KM:
@@ -397,7 +307,7 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
             "error_log": error_log,
             "planner_route": "retry_planner",
             "planner_retry_count": retry_count + 1,
-            "planner_last_error": "",  # 清掉上一轮解析失败原因（本轮是硬伤重试）
+            "planner_last_error": "",
         }
 
     exhausted = hard_errors and retry_count >= MAX_RETRY
@@ -423,44 +333,12 @@ def _validate_and_refine(state: TripPlannerState, plan: dict) -> dict:
 # ================================================================
 
 def _enrich_meals(plan: dict, city: str) -> None:
-    """用真实美食 POI 填充每天三餐（每天第一个景点 500m 周边）。
-
-    替换 LLM 编造餐厅；失败静默降级（meals 保持原样，不阻塞计划）。
-    """
+    """用真实美食 POI 填充每天三餐（保留函数签名供测试直接调用）"""
     try:
         wrapper = _get_amap_wrapper()
     except Exception:
-        return
-    for d in plan.get("days", []):
-        attrs = d.get("attractions", [])
-        if not attrs:
-            continue
-        a = attrs[0]
-        loc = a.get("location", {})
-        lng = loc.get("longitude") or loc.get("lng")
-        lat = loc.get("latitude") or loc.get("lat")
-        if not lng or not lat:
-            continue
-        try:
-            foods = wrapper.search_pois(city, "food", "", f"{lng},{lat}", "", max_results=3)
-        except Exception:
-            continue
-        if not foods:
-            continue
-        meal_types = ["breakfast", "lunch", "dinner"]
-        meals = []
-        for i, f in enumerate(foods[:3]):
-            meals.append({
-                "type": meal_types[i],
-                "name": f.name,
-                "description": f"{f.district} {f.category}".strip() or f.address,
-                "estimated_cost": int(f.price or 0),
-                "source": f.source,
-                "location": {"longitude": f.lng, "latitude": f.lat},
-            })
-        if meals:
-            d["meals"] = meals
-            print(f"🍽️ [三餐] {d.get('date', '?')}: 已用真实美食 POI 填充 {len(meals)} 餐")
+        wrapper = None
+    enrich_meals_tool(plan.get("days", []), city, amap_wrapper=wrapper)
 
 
 # ================================================================
@@ -470,7 +348,6 @@ def _enrich_meals(plan: dict, city: str) -> None:
 def _build_profile_constraints(profile: dict) -> str:
     """根据用户画像生成约束指令注入 LLM prompt"""
     constraints = []
-    # 注意: profile 可能含值为 None 的键（记忆 JSON 宽松），一律 or 兜底
     budget_tier = profile.get("budget_tier") or ""
     if budget_tier == "穷游":
         constraints.append("- 优先免费景点，预算 < 500 元/天")
@@ -493,11 +370,7 @@ def _build_profile_constraints(profile: dict) -> str:
 # ================================================================
 
 def _fan_out(state: TripPlannerState) -> list[Send]:
-    """conditional path: 按聚类结果动态分发 N 个 day_node（Send API，原生并行）。
-
-    实测确认（LangGraph 1.2.9）: Send 分支的 state 只含 payload（不合并共享 state），
-    因此 day_node 需要的全部上下文必须显式注入 payload。
-    """
+    """conditional path: 按聚类结果动态分发 N 个 day_node（Send API，原生并行）。"""
     clusters = state.get("day_clusters", [])
     dates = state.get("date_list", [])
     sends = []
@@ -508,7 +381,6 @@ def _fan_out(state: TripPlannerState) -> list[Send]:
             "day_kind": c.get("kind", "normal"),
             "day_pois": c.get("pois", []),
             "day_date": dates[i] if i < len(dates) else "",
-            # ── 共享上下文显式注入（Send 分支 state 隔离）──
             "city": state.get("city", ""),
             "origin": state.get("origin", ""),
             "transport_mode": state.get("transport_mode", "高铁"),
@@ -532,10 +404,7 @@ def _fan_out(state: TripPlannerState) -> list[Send]:
 def _format_day_prompt(idx: int, date: str, kind: str, attractions: list,
                        state: TripPlannerState,
                        guide_lines: list[str] | None = None) -> str:
-    """单天文案 prompt（LLM 只写文案，不决策选点/顺序/时间）。
-
-    guide_lines: 攻略知识库检索片段（v3.1，可引用具体玩法/避坑细节）。
-    """
+    """单天文案 prompt（LLM 只写文案，不决策选点/顺序/时间）。"""
     city = state.get("city", "")
     prefs = state.get("preferences", [])
     profile = state.get("user_profile", {})
@@ -575,7 +444,6 @@ def _format_day_prompt(idx: int, date: str, kind: str, attractions: list,
     if constraints:
         lines.append(constraints.strip())
 
-    # v3.1: 攻略知识库片段（真实玩法/避坑经验，可引用进文案）
     if guide_lines:
         lines.append("**参考攻略片段（来自攻略知识库，请在文案中自然引用其中的具体玩法/避坑细节）:**")
         lines.extend(guide_lines[:4])
@@ -590,14 +458,7 @@ def _format_day_prompt(idx: int, date: str, kind: str, attractions: list,
 
 
 def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
-    """单日计划节点（Send 并行实例，每天一次 LLM 文案调用）。
-
-    v3 职责划分:
-    - 景点集合: 聚类分配（数据层互斥，LLM 不选点 → 跨天零重复）
-    - 景点顺序/时间: route_solver 本地求解（贪心+2-opt+时间窗硬检查）
-    - LLM 只写文案: description/transportation/accommodation/tips（JSON mode）
-    - 韧性: leisure 天零 LLM；文案 LLM 失败 → 本地模板兜底，不阻断全链路
-    """
+    """单日计划节点（Send 并行实例，每天一次 LLM 文案调用）。"""
     idx = state.get("day_index", 0)
     kind = state.get("day_kind", "normal")
     pois = state.get("day_pois", [])
@@ -607,10 +468,9 @@ def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
         "date": date, "day_index": idx, "kind": kind,
         "description": "", "transportation": "", "accommodation": "",
         "hotel": {}, "attractions": [], "meals": [], "overall_tips": "",
-        "guide_references": [],   # v3.1: 攻略知识库引用（可溯源）
+        "guide_references": [],
     }
 
-    # ── 自由活动日: 零 LLM，本地模板 ──
     if kind == LEISURE:
         day["description"] = f"第{idx + 1}天自由活动，可逛街购物、品尝当地美食、休整充电。"
         day["transportation"] = "市内交通建议：优先地铁/公交。"
@@ -620,23 +480,28 @@ def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
 
     _emit(config, "planner", "start", {"day_index": idx, "kind": kind})
 
-    # ── 本地路径求解（确定性，不交 LLM）──
-    start_pt = None
+    # 本地路径求解（确定性，受指纹缓存加速）
     hotel = state.get("hotel_selected") or {}
-    if hotel.get("lng") and hotel.get("lat"):
-        start_pt = {"lng": hotel["lng"], "lat": hotel["lat"]}
-    plan = solve_daily_route(pois, state.get("day_start_hour", 9),
-                             state.get("day_end_hour", 20), start=start_pt)
-    window_ok = True
-    if not plan:
-        # 时间窗无法容纳全部点 → 软伤降级：全量点按聚类顺序（无时间标注）
+    route_res = solve_day_route_tool(
+        pois=pois,
+        start_hour=state.get("day_start_hour", 9),
+        close_hour=state.get("day_end_hour", 20),
+        start_hotel=hotel if hotel.get("lng") and hotel.get("lat") else None,
+        day_index=idx,
+    )
+    window_ok = route_res.diagnostics is None
+    if route_res.route:
+        if isinstance(route_res.route[0], dict) and "poi" in route_res.route[0]:
+            attractions = format_plan(route_res.route)
+        else:
+            attractions = route_res.route
+    else:
+        # 时间窗超限降级：全量点按聚类顺序（无时间标注）
         window_ok = False
-        plan = [{"poi": p, "arrive_min": 0, "depart_min": 0, "travel_min_from_prev": 0}
-                for p in pois]
-    attractions = format_plan(plan)
+        plan = [{"poi": p, "arrive_min": 0, "depart_min": 0, "travel_min_from_prev": 0} for p in pois]
+        attractions = format_plan(plan)
 
-    # ── v3.1: 攻略知识库检索（轻量 RAG，BM25；异常/未命中静默降级）──
-    # 每个景点最多取 1 段，最多 3 个景点——控制 prompt 体积；引用写入 day 可溯源
+    # 攻略知识库检索（轻量 RAG，BM25）
     guide_refs: list[dict] = []
     guide_lines: list[str] = []
     try:
@@ -649,10 +514,10 @@ def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
                                    "city": hit["city"], "tag": hit["tag"]})
                 guide_lines.append(f"  · {hit['guide']}（{hit['tag']}）: {hit['text']}")
     except Exception:
-        pass  # 知识库缺失/异常 → 不阻断
+        pass
     day["guide_references"] = guide_refs
 
-    # ── LLM 文案（失败本地兜底，不阻断）──
+    # LLM 文案（失败本地兜底，不阻断）
     text = _format_day_prompt(idx, date, kind, attractions, state, guide_lines)
     try:
         planner = get_planner()
@@ -666,7 +531,7 @@ def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
         day["accommodation"] = str(meta.get("accommodation", ""))
         day["overall_tips"] = str(meta.get("overall_tips", ""))
         status = "success"
-    except Exception as exc:
+    except Exception:
         day["description"] = f"第{idx + 1}天：游览{'、'.join(a['name'] for a in attractions)}。"
         day["transportation"] = "市内交通建议：优先地铁/公交。"
         day["overall_tips"] = "注意防晒补水，预留机动时间。"
@@ -676,24 +541,20 @@ def day_node(state: TripPlannerState, config: dict | None = None) -> dict:
     if not window_ok:
         status = "window_fallback"
     _emit(config, "planner", "done", {"day_index": idx, "status": status})
-    result: dict = {"plan_days": [day]}
+    result_dict: dict = {"plan_days": [day]}
     if status == "llm_fallback":
-        result["error_log"] = [f"第{idx + 1}天文案生成失败（已用本地模板）"]
+        result_dict["error_log"] = [f"第{idx + 1}天文案生成失败（已用本地模板）"]
     if not window_ok:
-        result["error_log"] = result.get("error_log", []) +             [f"第{idx + 1}天景点总时长超日窗口，已降级为无时间标注顺序"]
-    return result
+        result_dict["error_log"] = result_dict.get("error_log", []) + [f"第{idx + 1}天景点总时长超日窗口，已降级为无时间标注顺序"]
+    return result_dict
 
 
 # ================================================================
-# v3: 聚合节点（Send 汇聚只触发 1 次，实测确认）
+# v3: 聚合节点（Send 汇聚只触发 1 次）
 # ================================================================
 
 def _parse_weather_data(text: str) -> list[dict]:
-    """本地解析天气文本（_format_weather 固定格式）→ 结构化 weather_info。
-
-    格式: "- 2026-08-21: 晴转多云, 25°C~15°C, 南风"
-    解析失败返回空列表（软伤降级），不交 LLM。
-    """
+    """本地解析天气文本"""
     out = []
     for line in (text or "").splitlines():
         m = re.match(r"-\s*([\d-]+):\s*(.+)$", line.strip())
@@ -730,9 +591,7 @@ def _parse_price_range(price_range: str) -> int:
 
 
 def _compute_budget(days: list[dict], state: TripPlannerState) -> dict:
-    """本地预算计算（确定性，不交 LLM）:
-    门票 = Σ POI.price；住宿 = 酒店中值价 × 天数；餐饮 = Σ meals.estimated_cost；
-    交通 = 城际 cost + 市内 50 元/天。"""
+    """本地预算计算（确定性）"""
     total_attractions = sum(a.get("ticket_price") or 0
                             for d in days for a in d.get("attractions", []))
     total_meals = sum(m.get("estimated_cost") or 0
@@ -755,12 +614,7 @@ def _compute_budget(days: list[dict], state: TripPlannerState) -> dict:
 
 
 def merge_node(state: TripPlannerState, config: dict | None = None) -> dict:
-    """聚合节点（Send 分支汇聚，实测只触发 1 次）: 排序 → 填充 → 校验 → final_plan。
-
-    本地完成: 酒店填充（全程同一家）、三餐真实 POI、天气结构化解析、预算计算。
-    校验失败场景在本地链路中极少（聚类保证每天≥2 景点、预算本地算不超），
-    硬伤/软伤仍记录 error_log（降级透明），不回环重试。
-    """
+    """聚合节点: 排序 → 填充 → 校验 → final_plan。"""
     city = state.get("city", "")
     days = sorted(state.get("plan_days", []), key=lambda d: d.get("day_index", 0))
     error_log: list[str] = []
@@ -777,12 +631,12 @@ def merge_node(state: TripPlannerState, config: dict | None = None) -> dict:
             "error_log": error_log,
         }
 
-    # ── 1. 天气结构化（本地解析）──
+    # 1. 天气结构化
     weather_info = _parse_weather_data(state.get("weather_data", ""))
     if not weather_info:
         error_log.append("天气数据解析失败，天气信息为空（降级）")
 
-    # ── 2. 酒店填充（全程同一家，本地选定）──
+    # 2. 酒店填充（全程同一家）
     hotel = state.get("hotel_selected") or {}
     for d in days:
         if hotel:
@@ -796,10 +650,10 @@ def merge_node(state: TripPlannerState, config: dict | None = None) -> dict:
                 "distance": "全程入住同一家酒店",
             }
 
-    # ── 3. 本地预算（先算，plan 校验需要 budget）──
+    # 3. 本地预算
     budget = _compute_budget(days, state)
 
-    # ── 4. 三餐真实 POI 填充（复用既有机制）──
+    # 4. 三餐真实 POI 填充
     plan = {"city": city,
             "start_date": state.get("start_date", ""),
             "days": days,
@@ -807,16 +661,15 @@ def merge_node(state: TripPlannerState, config: dict | None = None) -> dict:
             "overall_suggestions": ""}
     _enrich_meals(plan, city)
 
-    # ── 5. 校验（软伤记录，硬伤不回环——本地链路已保证）──
+    # 5. 校验（软伤记录，硬伤降级交付）
     validation = _validate_and_refine(state, plan)
     error_log.extend(validation.get("error_log", []))
     if validation.get("planner_route") == "retry_planner":
-        # 本地链路出现硬伤说明上游数据异常，记录后仍交付（透明降级）
         error_log.append("校验发现硬伤但本地链路无法重试，已按当前结果交付")
 
-    # ── 6. 组装 final_plan ──
+    # 6. 组装 final_plan
     tips = [d.get("overall_tips", "") for d in days if d.get("overall_tips")]
-    overall = "；".join(tips)[:200] if tips else         "祝旅途愉快！建议提前预约热门景点门票，预留机动时间。"
+    overall = "；".join(tips)[:200] if tips else "祝旅途愉快！建议提前预约热门景点门票，预留机动时间。"
     final_plan = {
         "city": city,
         "start_date": state.get("start_date", ""),

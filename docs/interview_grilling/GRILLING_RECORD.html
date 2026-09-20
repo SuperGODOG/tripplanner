@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TripPlanner 深度面试与业务边界拷打记录 (Grilling Record)</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-light: #eff6ff;
+      --success: #059669;
+      --success-light: #ecfdf5;
+      --warning: #d97706;
+      --warning-light: #fffbeb;
+      --danger: #dc2626;
+      --danger-light: #fef2f2;
+      --slate-50: #f8fafc;
+      --slate-100: #f1f5f9;
+      --slate-200: #e2e8f0;
+      --slate-300: #cbd5e1;
+      --slate-600: #475569;
+      --slate-700: #334155;
+      --slate-800: #1e293b;
+      --slate-900: #0f172a;
+      --radius: 10px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background-color: var(--slate-50);
+      color: var(--slate-800);
+      line-height: 1.65;
+      font-size: 15px;
+      padding: 30px 20px;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #fff;
+      padding: 32px 36px;
+      border-radius: var(--radius);
+      margin-bottom: 28px;
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15);
+      position: relative;
+    }
+
+    .header h1 {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header p {
+      color: #94a3b8;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .print-btn {
+      position: absolute;
+      top: 32px;
+      right: 36px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .print-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    /* Cards */
+    .card {
+      background: #fff;
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius);
+      padding: 26px 30px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03);
+    }
+
+    /* Overview Section */
+    .overview-card {
+      border-left: 5px solid var(--primary);
+      background: #ffffff;
+    }
+
+    .section-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--slate-900);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--slate-100);
+    }
+
+    .sub-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--slate-800);
+      margin: 18px 0 10px 0;
+    }
+
+    /* Step Timeline */
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .pipeline-step {
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      padding: 16px;
+      position: relative;
+    }
+
+    .step-num {
+      display: inline-block;
+      background: var(--primary);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+
+    .step-title {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--slate-900);
+      margin-bottom: 6px;
+    }
+
+    .step-desc {
+      font-size: 12.5px;
+      color: var(--slate-600);
+      line-height: 1.5;
+    }
+
+    /* Tech Contribution List */
+    .contribution-list {
+      list-style: none;
+      margin-top: 10px;
+    }
+
+    .contribution-list li {
+      position: relative;
+      padding-left: 22px;
+      margin-bottom: 10px;
+      font-size: 14px;
+      color: var(--slate-700);
+    }
+
+    .contribution-list li::before {
+      content: "✦";
+      position: absolute;
+      left: 0;
+      color: var(--primary);
+      font-weight: bold;
+    }
+
+    .contribution-list strong {
+      color: var(--slate-900);
+    }
+
+    /* Question & Critique Cards */
+    .q-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .q-badge {
+      background: var(--primary-light);
+      color: var(--primary-dark);
+      font-weight: 600;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid rgba(37, 99, 235, 0.2);
+    }
+
+    .q-scenario {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 14px;
+      font-size: 13.5px;
+      color: var(--slate-700);
+    }
+
+    .q-items {
+      margin-left: 20px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      color: var(--slate-800);
+    }
+
+    .q-items li {
+      margin-bottom: 6px;
+    }
+
+    /* User Answer Box */
+    .user-answer-box {
+      background: #f8fafc;
+      border-left: 4px solid var(--slate-300);
+      border-radius: 0 6px 6px 0;
+      padding: 12px 16px;
+      margin: 14px 0;
+      font-size: 13.5px;
+      color: var(--slate-600);
+      font-style: italic;
+    }
+
+    .user-answer-box::before {
+      content: "🗣️ 用户口述答题记录：";
+      display: block;
+      font-weight: 600;
+      color: var(--slate-700);
+      font-style: normal;
+      margin-bottom: 4px;
+      font-size: 12.5px;
+    }
+
+    /* Fact & Critique Box */
+    .critique-box {
+      background: var(--success-light);
+      border: 1px solid rgba(5, 150, 105, 0.25);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 14px;
+    }
+
+    .critique-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--success);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .critique-content {
+      font-size: 13.5px;
+      color: var(--slate-800);
+      line-height: 1.6;
+    }
+
+    .critique-content ul, .critique-content ol {
+      margin-left: 18px;
+      margin-top: 6px;
+    }
+
+    .critique-content li {
+      margin-bottom: 6px;
+    }
+
+    code {
+      font-family: "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+      background: rgba(15, 23, 42, 0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12.5px;
+      color: #b91c1c;
+    }
+
+    pre code {
+      background: none;
+      padding: 0;
+      color: var(--slate-800);
+    }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 13.5px;
+    }
+
+    th, td {
+      border: 1px solid var(--slate-200);
+      padding: 10px 14px;
+      text-align: left;
+    }
+
+    th {
+      background: var(--slate-100);
+      color: var(--slate-900);
+      font-weight: 600;
+    }
+
+    tr:nth-child(even) td {
+      background: #fafafa;
+    }
+
+    /* Print Styles */
+    @media print {
+      body {
+        background: #fff !important;
+        padding: 0 !important;
+        font-size: 10.5pt !important;
+        line-height: 1.45 !important;
+        color: #000 !important;
+      }
+
+      .container {
+        max-width: 100% !important;
+      }
+
+      .no-print, .print-btn {
+        display: none !important;
+      }
+
+      .header {
+        background: none !important;
+        color: #000 !important;
+        padding: 0 0 12pt 0 !important;
+        border-bottom: 2pt solid #000 !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+      }
+
+      .header h1 {
+        font-size: 18pt !important;
+      }
+
+      .header p {
+        color: #555 !important;
+      }
+
+      .card {
+        border: 1pt solid #ccc !important;
+        box-shadow: none !important;
+        border-radius: 4pt !important;
+        padding: 12pt !important;
+        margin-bottom: 14pt !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      .overview-card {
+        border-left: 4pt solid #000 !important;
+      }
+
+      .critique-box {
+        background: #f9f9f9 !important;
+        border: 1pt solid #bbb !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      .pipeline-step {
+        background: #f9f9f9 !important;
+        border: 0.5pt solid #ddd !important;
+      }
+
+      table, th, td {
+        border: 0.5pt solid #999 !important;
+        font-size: 9.5pt !important;
+      }
+
+      @page {
+        margin: 1.2cm 1.5cm;
+        size: A4;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <header class="header">
+    <button class="print-btn no-print" onclick="window.print()">🖨️ 打印 / 保存 PDF</button>
+    <h1>TripPlanner 深度面试与业务边界考查全景</h1>
+    <p>涵盖端到端架构哲学、空间运筹算法（K-Means/2-opt/Minimax）、LangGraph Send 并发与状态规约、双轨统计记忆与 5 级容灾降级体系。</p>
+  </header>
+
+  <!-- Section 0: HR Overview -->
+  <section class="card overview-card">
+    <h2 class="section-title">📌 项目通盘概览（应对 HR / 面试官：“请介绍一下项目以及你主要做了哪些？”）</h2>
+    
+    <div class="sub-title">1. 一句话定位与核心价值</div>
+    <p><strong>TripPlanner</strong> 是一个基于 <strong>Python / FastAPI / LangGraph / 高德 MCP / SQLite / DeepSeek</strong> 构建的工业级多日旅行规划 AI Agent 系统。针对传统大模型在长链路规划中极易出现的<strong>“跨天景点重复、路线空间绕远、虚假坐标幻觉、算术超预算”</strong>等痛点，主导设计并落地了<strong>“确定性算法优先，LLM 最小职责”</strong>的解耦架构，实现了规划结果的 <strong>0 空间幻觉、秒级并发响应与 100% 稳定收敛交付</strong>。</p>
+
+    <div class="sub-title">2. 端到端完整业务流水线（4 阶段）</div>
+    <div class="pipeline-grid">
+      <div class="pipeline-step">
+        <span class="step-num">阶段 1</span>
+        <div class="step-title">确定性感知与空间分天</div>
+        <div class="step-desc">高德多偏好检索 + 坐标增强；<strong>K-Means++ 空间聚类</strong>保证跨天互斥；<strong>Minimax 目标函数</strong>选定中央酒店。</div>
+      </div>
+      <div class="pipeline-step">
+        <span class="step-num">阶段 2</span>
+        <div class="step-title">动态分日扇出 (Map)</div>
+        <div class="step-desc">LangGraph <strong>Send API</strong> 派发 N 路并行；<strong>贪心+2-opt+时间窗</strong>排路线；手写 <strong>BM25</strong> 召回真实玩法；LLM 纯生成文案。</div>
+      </div>
+      <div class="pipeline-step">
+        <span class="step-num">阶段 3</span>
+        <div class="step-title">汇聚校验与富化 (Reduce)</div>
+        <div class="step-desc"><strong>Annotated Reducer</strong> 无锁合并；填充酒店与首景点三餐 POI；本地算预算；<strong>纯线性 DAG 无回环</strong>，硬伤降级交付。</div>
+      </div>
+      <div class="pipeline-step">
+        <span class="step-num">阶段 4</span>
+        <div class="step-title">持久化与流式交付</div>
+        <div class="step-desc"><strong>SqliteSaver</strong> 每步快照；<strong>SSE</strong> 实时推送节点进度事件；API 始终返回 200 OK + 降级面板明细。</div>
+      </div>
+    </div>
+
+    <div class="sub-title">3. 我在项目中主要负责的核心技术工作</div>
+    <ul class="contribution-list">
+      <li><strong>架构演进与图编排</strong>：设计从全 LLM 脆弱流向“确定性计算下沉 + 动态分日并行”重构，利用 Send API 显式注入隔离上下文，解决状态竞态与跨 step fan-in 双触发缺陷，Token 消耗骤减 60%，耗时由 20s+ 压缩至 3~5s。</li>
+      <li><strong>空间运筹与算法下沉</strong>：手写落地 K-Means++ 空间聚类、2-opt 消除路径自交叉、Haversine &times; 1.4 绕路通行估算、Minimax 酒店通勤选址打分。</li>
+      <li><strong>轻量 RAG 与多源知识协同</strong>：放弃沉重向量库，针对确定性景点实体手写 Bigram BM25 检索算法与 Query 意图词增强（<code>景点+玩法</code>），实现攻略覆盖率 83% 且引用可溯源。</li>
+      <li><strong>高并发治理与死锁防御</strong>：针对外层多偏好与内层坐标增强产生的 25+ 嵌套并发，构建单例全局 MCP 线程池（限流 &le; 10），确立“全局池仅提交叶子任务”铁律，杜绝 QPS 打爆与线程池饥饿死锁；配合 LRU 缓存加速。</li>
+      <li><strong>统计信号画像系统</strong>：设计基于 <strong>IQR 四分位距（数值型）</strong> 与 <strong>众数频率比（分类型）</strong> 的双轨异常检测，配合 &ge; 5 次冷启动门控，防止单次偶发极端行为污染用户长期画像。</li>
+      <li><strong>质量工程与高可用体系</strong>：编写 60 个无网络、无真实 LLM 的离线单元测试（全 Fake 注入），建立 5 级渐进式容灾降级网与 <code>error_log</code> 累积机制，保证极端异常下服务零崩溃。</li>
+    </ul>
+  </section>
+
+  <!-- Question 1 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">第 1 题 · 空间聚类与 POI 稀疏极端边界</h3>
+      <span class="q-badge">K-Means++ 聚类 · 自由日触发 · 边界降级</span>
+    </div>
+    <div class="q-scenario">
+      <strong>场景设定：</strong>用户规划 <strong>N = 5 天</strong>，但该城市召回去重后有效市区 POI <strong>仅有 3 个</strong>（少于 5&times;2 个），同时有 <strong>1 个距离市中心 85km 的远郊点</strong>（判定为 excursion）。
+    </div>
+    <ol class="q-items">
+      <li>底层聚类算法（<code>clustering.py</code>）中，目标簇数 $k$ 的计算公式是什么？这 3 个市区点与 1 个远郊点最终如何划分？</li>
+      <li>最终生成的 5 天行程在 <code>day_clusters</code> 中的 <code>kind</code> 分布及 <code>day_index</code> 排序规则是怎样的？</li>
+      <li>该设计在业务体验上是否存在不足，如何改进？</li>
+    </ol>
+    <div class="user-answer-box">
+      “根据聚类算法，三个市区是一个簇，一个远郊区是一个簇。至于什么时候触发自由日不是太清楚。kind 分布没看懂，具体排序是根据酒店的 minimax 择远近来排序的。DayNode 先获取景点，再根据 Minimax 获取酒店 top1，再把景点、酒店、天气按 day index 完成每天行程。体验不足在于固定工作流灵活度不足。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 深度评析与代码事实标准答案</div>
+      <div class="critique-content">
+        <ul>
+          <li><strong>簇数计算与自由日触发机制（<code>clustering.py:76-80</code>）</strong>：
+            规则定义 <code>MIN_PER_DAY = 2</code>。远郊点先占 1 天（<code>remain_days = 5 - 1 = 4</code>），市区目标簇数 $k = \min(4, 3 // 2) = 1$。因此 3 个市区点合并为 <strong>1 个 normal 市区簇</strong>。当前簇总数（1 normal + 1 excursion = 2）&lt; 5，<code>while len(clusters) &lt; days</code> 循环自动补齐 <strong>3 个自由活动日（<code>leisure</code>）</strong>。
+          </li>
+          <li><strong><code>day_index</code> 排序机制并非按酒店（<code>clustering.py:110-121</code>）</strong>：
+            聚类时酒店尚未选定。排序规则为：
+            <ol>
+              <li><strong>市区簇（<code>normal</code>）</strong>：按簇内 POI 的<strong>平均经度</strong>升序排列（近似东西向移动），分配为 <code>day_index = 0</code>；</li>
+              <li><strong>远郊日（<code>excursion</code>）</strong>：排在市区簇之后，分配为 <code>day_index = 1</code>；</li>
+              <li><strong>自由日（<code>leisure</code>）</strong>：排在最后补齐剩余天数，分配为 <code>day_index = 2, 3, 4</code>。</li>
+            </ol>
+          </li>
+          <li><strong>时序与短路机制</strong>：
+            酒店选址在 <code>hotel_node</code> 阶段一次性选定。<code>day_node</code> 遇到 <code>leisure</code> 时，在 <code>nodes.py:614-619</code> <strong>直接短路返回固定休闲文案</strong>，零 LLM 消耗。
+          </li>
+          <li><strong>业务缺陷与改进</strong>：
+            5 天行程出现 3 天自由日过于空洞。应在 <code>attraction_node</code> 召回不足时触发<strong>自适应泛化召回</strong>（如将搜索半径由 20km 扩至 30km 或扩充“公园/夜市”等通用词），而非过早退化为自由日。
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Question 2 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">第 2 题 · 拓扑并发与数据隔离边界</h3>
+      <span class="q-badge">LangGraph Send API · 状态隔离 · Channel Reducer</span>
+    </div>
+    <div class="q-scenario">
+      <strong>场景设定：</strong>在 v3 架构中，系统通过 LangGraph 的 <code>Send("day_node", payload)</code> 动态并发扇出多天行程，最后由 <code>merge_node</code> 汇聚。
+    </div>
+    <ol class="q-items">
+      <li>为什么 <code>_fan_out</code> 必须将 <code>city</code>、<code>weather_data</code>、<code>hotel_selected</code>、<code>user_profile</code> 显式打包进 payload，而不是直接从全局 State 读？</li>
+      <li>当 N 个 <code>day_node</code> 并行写回结果时，为什么不会发生多线程状态覆盖（Race Condition）？</li>
+      <li>多路 <code>day_node</code> 并行汇聚到 <code>merge_node</code> 时，<code>merge_node</code> 会被触发执行几次？</li>
+    </ol>
+    <div class="user-answer-box">
+      “主要是防止上下文爆炸吧。因为并发节点只需要城市、天气、酒店、画像。Send 机制通过并发多个 agent，每个读初始 payload，根据划分的不同 payload 执行文案，然后通过 reducer 合并。建立全局单例池将叶子任务作为最小单元防止死锁或覆盖。采用 FIFO 队列排队写入。MergeNode 只会触发一次。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 深度评析与代码事实标准答案</div>
+      <div class="critique-content">
+        <ul>
+          <li><strong>Send 显式注入的底层原因（<code>builder.py:48-60</code>）</strong>：
+            LangGraph 的 <code>Send("day_node", payload)</code> 在底层是<strong>物理状态隔离</strong>的。子节点 <code>day_node</code> 接收到的 <code>state</code> <strong>仅包含 payload 字典本身，不会继承父图全局 State</strong>。若不显式传入共享上下文，子分支内部读不到数据（引发 KeyError）。
+          </li>
+          <li><strong>并发无覆盖的真实机制（<code>state.py:43, 65</code>）</strong>：
+            非 FIFO 队列，而是依靠 LangGraph 状态通道的 <strong>Reducer 声明</strong>：<code>plan_days: Annotated[list, operator.add]</code> 与 <code>error_log: Annotated[list, operator.add]</code>。在 Pregel 执行引擎中，同一 Superstep 并行的各个分支产出的字典在步末通过 <code>operator.add</code>（<code>list.extend</code>）进行<strong>原子状态规约</strong>。
+          </li>
+          <li><strong><code>merge_node</code> 触发机制</strong>：
+            同一个 <code>_fan_out</code> 派发的 N 个 Send 分支属于<strong>同一个执行 Superstep</strong>。引擎会等待该步内所有分支执行完毕、完成 Reducer 状态合并后，才一次性推进到下游 <code>merge_node</code>，实测确认只触发 1 次。
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Question 3 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">第 3 题 · 长期记忆统计信号与异常画像边界</h3>
+      <span class="q-badge">IQR 四分位距 · 众数频率比 · 渐进画像门控</span>
+    </div>
+    <div class="q-scenario">
+      <strong>场景设定：</strong>用户 Alex 历史上 5 次旅行均为 300~500 元经济酒店、饮食“不吃辣”。第 6 次突然陪客户出差，输入了“价格:1800-2200”与“饮食:爱吃辣”。
+    </div>
+    <ol class="q-items">
+      <li>双轨异常检测算法（<code>_compute_outlier_penalty</code>）中，IQR 判定与分类型众数频率比的具体公式是什么？</li>
+      <li>该记录是否会写入 SQLite？<code>outlier_penalty</code> 为多少？此时重新计算画像，画像会被突变为豪华型/爱吃辣吗？</li>
+      <li>如果 Alex 连续 3 次出差都住 1800 元，记忆系统如何实现平滑真实迁移？为什么设定 trip_count &ge; 5 门控？</li>
+    </ol>
+    <div class="user-answer-box">
+      “双轨异常检测忘了是哪双轨了，只记得有个方差计算，超出方差就降权。新记录也会写入 SQLite，但是权重降低。由于有缓冲机制，异常情况不会突然改变现行主流画像。如果持续输入豪华型，随着数据增加阈值扩大最终修改。冷启动设定 5 次是因为判定公式需要积累样本才具有统计意义。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 深度评析与代码事实标准答案</div>
+      <div class="critique-content">
+        <ul>
+          <li><strong>双轨异常检测机制</strong>：
+            <ol>
+              <li><strong>数值型（价格/预算/距离）走 IQR（四分位距法，<code>manager.py:252-284</code>）</strong>：不用方差是因为<strong>均值与方差极易被极端值拉偏</strong>；而四分位数与中位数（Median）鲁棒性极高。判定区间为 $[Q_1 - 2\times IQR, Q_3 + 2\times IQR]$。</li>
+              <li><strong>分类型（饮食/交通/住宿）走 众数频率比（<code>manager.py:285-330</code>）</strong>：新标签历史频次 &lt; 众数频次 &times; 0.3 时判定为异常。</li>
+            </ol>
+          </li>
+          <li><strong>打标与画像防突变</strong>：
+            异常记录<strong>依然写入 SQLite</strong>，但打上 <code>outlier_penalty = 0.3</code>（权重打 3 折）。生成画像时取历史价格<strong>中位数</strong>：5 个 400 元 + 1 个 2000 元的中位数仍为 400 元，Alex 的画像<strong>稳定保持为经济型</strong>。
+          </li>
+          <li><strong>真实偏好平滑迁移与冷启动</strong>：
+            随着 1800 元频次增加，<code>frequency_boost</code> 上升，且<strong>时间衰减因子（<code>time_decay</code>）</strong>赋予最新记录更高权重，价格中位数右移，画像自然平滑过渡。冷启动设定 &ge; 5 次是为了防止单次行为给用户打上永久刻板标签。
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Question 4 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">第 4 题 · 全图无回环与多层级容灾降级边界</h3>
+      <span class="q-badge">DAG 纯线性拓扑 · 5 级降级链 · 透明交付</span>
+    </div>
+    <div class="q-scenario">
+      <strong>场景设定：</strong>某次规划同时发生：1) 高德天气接口 10s 超时；2) Day 2 文案 LLM 连续 3 次解析失败；3) merge_node 本地计算总预算超出输入上限。
+    </div>
+    <ol class="q-items">
+      <li>v3 架构为什么彻底删除了 <code>retry_planner</code> 重试回环？出现校验硬伤系统会怎么做？</li>
+      <li>对于天气超时、Day 2 文案失败、Merge 预算硬伤，系统如何逐级兜底降级？最终 status 是什么？</li>
+      <li><code>error_log: Annotated[list, add]</code> 如何交付给前端？相比直接抛出 500 报错有何业务价值？</li>
+    </ol>
+    <div class="user-answer-box">
+      “删除 node 回环本质上是幻觉和时间的考量。在没有回环的情况下，校验硬伤交给后端处理做好标记。天气超时通过限制并发池为 10 排队防触发 QPS，超时后重试或记录日志；Day 2 文案失败会写 error_log，极端情况避免直接报 500。透明降级可以在告知用户没有明确生成的情况下让用户理性参考。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 深度评析与代码事实标准答案</div>
+      <div class="critique-content">
+        <ul>
+          <li><strong>删除回环的决策（<code>ARCHITECTURE.md:95</code>）</strong>：
+            v2 方案大模型整单生成 5 天出现硬伤时回环重试，大模型常无法理解硬伤导致连续重试 3 次失败，徒增 15~20s 延迟并崩溃。v3 将分天、路径、选址、预算全量下沉为<strong>本地确定性算法</strong>，硬伤在结构上物理消灭。偶发硬伤时在 <code>nodes.py:813-815</code> <strong>绝不回环</strong>，记录 <code>error_log</code> 直接以 <code>degraded</code> 状态交付。
+          </li>
+          <li><strong>三处故障的逐级降级流转</strong>：
+            <ol>
+              <li><strong>天气超时</strong>：底层 <code>run_mcp</code> 10s 截断，<code>_validate</code> 触发<strong>天气兜底提示</strong>（“天气数据暂不可用，建议春秋季带外套...”），<code>merge_node</code> 记入 <code>error_log</code>；</li>
+              <li><strong>Day 2 文案失败</strong>：指数退避重试（1s&rarr;2s&rarr;4s）仍失败后，<code>day_node</code> <strong>立即启用本地静态模板兜底</strong>（<code>nodes.py:675-715</code>），基于真实 POI 拼接默认文案，置 <code>status="llm_fallback"</code>，不阻断全图；</li>
+              <li><strong>Merge 预算超限</strong>：校验记录日志，全局 <code>status</code> 标记为 <code>"degraded"</code>。</li>
+            </ol>
+          </li>
+          <li><strong>透明交付业务价值</strong>：
+            API 始终返回 <strong>HTTP 200 OK</strong> + 完整计划 JSON + <code>error_log</code> 列表。前端降级面板按警告级别着色展示，用户拿到 85 分可用方案远好于白屏 500 报错。
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Question 5 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">第 5 题 · 本地路径求解、BM25 轻量 RAG 与离线测试质量工程</h3>
+      <span class="q-badge">2-opt 消除交叉 · BM25 Query 增强 · 60 个 Fake 单元测试</span>
+    </div>
+    <div class="q-scenario">
+      <strong>场景设定：</strong>考查本地 TSP 求解算法（贪心+2-opt）、轻量攻略 RAG 检索及 60 个离线单元测试捕获的隐蔽缺陷。
+    </div>
+    <ol class="q-items">
+      <li>为什么不直接调高德路径规划 API，而在本地用“Haversine 直线距离 &times; 1.4 绕路系数”？2-opt 解决了什么问题？时间窗超限如何降级？</li>
+      <li>为什么该模块手写轻量 BM25 坚决不上向量库？检索时为何将 Query 增强为“景点名 + 玩法”？</li>
+      <li>为什么 60 个单元测试做到无网络全 Fake 注入？捕获的“fan-in 双触发”或“POI 坐标缺失”缺陷具体是如何发生的？</li>
+    </ol>
+    <div class="user-answer-box">
+      “高德是一对一结构，而我们要多点找自由路径，所以选贪心+2-opt。2-opt 解决时间窗口差的问题，时间超限就把最长耗时任务去除。向量库体型臃肿且语义余弦值计算跟业务关系不大。用景点名+玩法是因为两个维度取并集。聚合双触发缺陷和坐标缺失具体原因忘了。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 深度评析与代码事实标准答案</div>
+      <div class="critique-content">
+        <ul>
+          <li><strong>本地路径求解与 2-opt（<code>route_solver.py:30-75</code>）</strong>：
+            构建 TSP 距离矩阵若调用高德 API 需要 $O(M^2)$ 次请求，数十次外部调用会导致<strong>网络延迟从 0.1ms 飙升至数秒并打爆 QPS</strong>。采用 Haversine &times; 1.4 城市绕路系数，0 成本、0.1ms 算出高逼真耗时。<strong>2-opt 的核心作用是消除路径自交叉（折返跑）</strong>。时间窗超限时<strong>绝不删除景点</strong>，而是触发<strong>软伤降级</strong>：保留 POI 顺序但隐去精确时间戳。
+          </li>
+          <li><strong>BM25 攻略 RAG 的 Query 意图词增强（<code>guide_rag.py:121-124</code>）</strong>：
+            攻略段落正文通常<strong>不重复出现景点名称</strong>（如故宫玩法段落第一句是“从午门进直奔太和殿...”，正文无“故宫”二字）。纯景点名检索会导致<strong>大面积词频为零（TF=0）无法召回</strong>。将 Query 扩充为 <code>故宫 + 玩法</code>，意图词“玩法”可精准匹配段落标签【玩法】，顺利召回。
+          </li>
+          <li><strong>离线测试基线捕获的 5 项隐蔽缺陷</strong>：
+            <ol>
+              <li><strong>LangGraph fan-in 跨 step 双触发</strong>：早期 <code>attraction</code> 与 <code>memory</code> 分支在不同 step 结束时汇聚，导致下游 <code>planner</code> 跑了 2 遍。v3 改为 Send 动态派发同一 step 汇聚修复。</li>
+              <li><strong>高德 POI 坐标缺失</strong>：高德 text search 返回的 POI 不带 location，进入 K-Means 时全部因缺坐标被丢弃。Wrapper 内部引入 <code>_enrich_pois_with_coords</code> 强制并发调 <code>maps_geo</code> 补齐。</li>
+              <li><strong>用户画像 None 击穿</strong>：新用户画像缺省字段为 None 引发 KeyError，增加了缺省字典防御。</li>
+              <li><strong>LLM 幻觉坐标（偏差 1300km）</strong>：早期让 LLM 生成经纬度产生巨大偏差，全面改为高德真实数据结构化流转。</li>
+            </ol>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Summary Table -->
+  <section class="card">
+    <h3 class="section-title">🏆 第一阶段 · 基础 Grilling 总结与技术画像评定</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>考核维度</th>
+          <th style="width: 100px;">掌握程度</th>
+          <th>关键亮点</th>
+          <th>需巩固强化的核心点</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>1. 业务流程与拓扑架构</strong></td>
+          <td><span style="color: #059669; font-weight: 600;">良好</span></td>
+          <td>清楚“确定性优先、LLM 最小职责”核心哲学，理解分日并发与分层交付。</td>
+          <td>掌握 LangGraph Send API 的分支状态物理隔离语义与 Reducer 状态规约机制。</td>
+        </tr>
+        <tr>
+          <td><strong>2. 空间与运筹算法</strong></td>
+          <td><span style="color: #d97706; font-weight: 600;">中等</span></td>
+          <td>理解 K-Means 分天与 Minimax 选址的目标。</td>
+          <td>巩固 2-opt 消除路径自交叉、Haversine 绕路系数（1.4）与稀疏自由日触发公式。</td>
+        </tr>
+        <tr>
+          <td><strong>3. 记忆系统与统计信号</strong></td>
+          <td><span style="color: #059669; font-weight: 600;">良好</span></td>
+          <td>能够清晰阐述异常降权与画像渐进生效的业务价值。</td>
+          <td>牢记“数值型走 IQR（四分位距）、分类型走众数频率比”的双轨机制。</td>
+        </tr>
+        <tr>
+          <td><strong>4. 系统容灾与质量工程</strong></td>
+          <td><span style="color: #059669; font-weight: 600;">良好</span></td>
+          <td>理解全图无回环、多层级降级与可用性优先的价值。</td>
+          <td>熟记 60 个离线 Fake 测试捕获的 5 项隐蔽缺陷（fan-in 双触发、POI 坐标补齐等）。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Phase 2 Header -->
+  <div style="margin: 32px 0 16px 0; padding: 12px 18px; background: #e0f2fe; border-left: 5px solid #0284c7; border-radius: 6px;">
+    <h2 style="font-size: 18px; font-weight: 700; color: #0369a1; margin-bottom: 4px;">🎯 第二阶段 · project-mock-interview 专项题库实战</h2>
+    <p style="font-size: 13px; color: #0c4a6e;">路由命中关键词：<strong>Prompt调优、RAG系统搭建、Agent框架开发</strong></p>
+  </div>
+
+  <!-- Phase 2: Question L9 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">题号 L9 · 多Agent系统编排模式与框架选型考量</h3>
+      <span class="q-badge">LangGraph 图编排 · Multi-Agent · 状态持久化</span>
+    </div>
+    <div class="q-scenario">
+      <strong>考察领域：</strong>二_Agent应用开发相关 / 2.agent主流框架 (Depth 4)
+    </div>
+    <ol class="q-items">
+      <li>多 Agent 系统（Multi-Agent System）常见的编排模式有哪些？在框架选型（如 LangChain、LangGraph、AutoGen 等）时有哪些核心考量因素？</li>
+      <li>结合你在本项目中的具体实现，谈谈你为什么选择当前的编排框架与模式？</li>
+    </ol>
+    <div class="user-answer-box">
+      “选择框架根据业务流程来比较。分为固定工作流（如 TripPlanner）和自由工作流（如 Coding Agent）。流水线无分支选 LangChain，有环/并发/分支选 LangGraph，发散讨论/代码讨论选 AutoGen。本项目是固定工作流且在分簇后要实现多天并发和汇聚，这是 LangChain 做不到的。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 四维量化打分与代码事实点评</div>
+      <div class="critique-content">
+        <table>
+          <thead>
+            <tr><th>维度</th><th>得分 (1-5)</th><th>依据</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>概念理解</strong></td><td><strong>4.5</strong></td><td>准确区分固定工作流（DAG）与自由工作流（辩论/Coding Agent），精准对比 LangChain、LangGraph 与 AutoGen 定位。</td></tr>
+            <tr><td><strong>原理深度</strong></td><td><strong>3.5</strong></td><td>阐明了分簇后的动态并发扇出与汇聚需求，但未深入剖析 LangGraph 底层状态机（TypedDict）、Channel Reducer 与 Checkpoint 机制。</td></tr>
+            <tr><td><strong>落地证据</strong></td><td><strong>3.0</strong></td><td>提到了分簇并发与汇聚场景，但缺少关键代码与配置支撑（如 builder.py 的 Send API、state.py 的 Reducer、SqliteSaver）。</td></tr>
+            <tr><td><strong>结构完整度</strong></td><td><strong>3.5</strong></td><td>完成了概念分类 &rarr; 框架选型对比 &rarr; 业务适配三步，缺少第四步“生产级持久化与状态机工程权衡”。</td></tr>
+          </tbody>
+        </table>
+        <ul>
+          <li><strong>答对</strong>：准确指出业务流程属于带并发/分支的固定工作流，AutoGen 偏自由协商，LangChain 难以支持图分支汇聚，LangGraph 适合分簇并发与聚合。</li>
+          <li><strong>答漏</strong>：遗漏选型 LangGraph 的三大核心工程理由：显式状态机与无锁 Reducer 聚合（<code>error_log: Annotated[list, add]</code>）、Checkpointer 原生断点续传（<code>SqliteSaver</code>）、全图可观测与事件流。</li>
+          <li><strong>证据锚点</strong>：<code>app/graph/builder.py:50-60</code>（Send API 动态 fan-out 派发）、<code>app/graph/state.py:43,65</code>（<code>Annotated[list, add]</code> 状态规约）、<code>app/graph/builder.py:110</code>（SqliteSaver 快照持久化）。</li>
+          <li><strong>追问</strong>：如果未来业务需要支持用户在规划执行到一半时随时暂停、修改偏好后继续规划，LangGraph 的什么机制能够原生支持该需求？</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Phase 2: Question L62 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">题号 L62 · 静态离线文档检索与动态实时API接口调用</h3>
+      <span class="q-badge">Tool Calling · BM25 攻略库 · 多源知识降级</span>
+    </div>
+    <div class="q-scenario">
+      <strong>考察领域：</strong>二_Agent应用开发相关 / 3.工具相关 (Depth 1)
+    </div>
+    <ol class="q-items">
+      <li>在构建企业级 AI 应用时，静态离线文档检索（RAG）与动态实时 API 接口调用（如 Tool Calling 获取实时数据）各自适用于什么场景？</li>
+      <li>结合 TripPlanner 项目中“高德地图数据、BM25 攻略库、长期用户画像、天气数据”的落地方案，谈谈你是如何进行多源知识选型与降级衔接的？</li>
+    </ol>
+    <div class="user-answer-box">
+      “实时更新信息建议动态调用 API 接口（如 Tool Calling 获取时间/天气）。沉淀的方法论经验可用 Skill 或 RAG（医学专业意见走 RAG，抽象可复用技能走 Skill）。高德数据走实时 API；BM25 做旅游攻略 RAG（攻略不随时间剧烈变化）；长期用户画像走本地 SQLite/JSON 存储。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 四维量化打分与代码事实点评</div>
+      <div class="critique-content">
+        <table>
+          <thead>
+            <tr><th>维度</th><th>得分 (1-5)</th><th>依据</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>概念理解</strong></td><td><strong>4.5</strong></td><td>准确指出“时效性与动态性”是 API 与 RAG 的分水岭，并富有见地地对比了 Skill（轻量方法论沉淀）与 RAG（非结构化实体知识）的边界。</td></tr>
+            <tr><td><strong>原理深度</strong></td><td><strong>4.0</strong></td><td>清楚区分了高德 MCP（分钟级高频动态数据）与 BM25 攻略知识库（稳定经验）以及本地长期记忆画像的底层存储差异。</td></tr>
+            <tr><td><strong>落地证据</strong></td><td><strong>3.5</strong></td><td>准确映射了项目中的高德地图、BM25 攻略 RAG 与 SQLite 记忆，但漏掉了核心的“实时到静态的降级链条”。</td></tr>
+            <tr><td><strong>结构完整度</strong></td><td><strong>3.5</strong></td><td>走完了场景概念定义 &rarr; 项目知识源映射 &rarr; 架构权衡，缺少第四步“动态 API 发生网络异常时如何平滑降级至静态兜底”。</td></tr>
+          </tbody>
+        </table>
+        <ul>
+          <li><strong>答对</strong>：精准指出时效变化数据（天气/高德 POI）走动态 Tool Calling，非时效攻略走 BM25 RAG，用户画像走本地持久化。</li>
+          <li><strong>答漏</strong>：遗漏了项目中“实时 &rarr; 静态兜底 &rarr; 透明标注”的具体降级工程实践（如天气 MCP 超时 &rarr; <code>_weather_fallback</code> 静态气温常识兜底；城际 API 失败 &rarr; 静态经验距离表兜底并记录 <code>error_log</code>）。</li>
+          <li><strong>证据锚点</strong>：<code>app/api/trip.py:237</code>（<code>_fetch_weather</code> 动态天气 MCP）、<code>app/services/guide_rag.py</code>（静态攻略 BM25）、<code>app/memory/manager.py</code>（纯本地画像）。</li>
+          <li><strong>追问</strong>：在攻略知识库中，为什么选择手写 BM25 算法而不是直接引入向量数据库（Embedding + Vector Search）？</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Phase 2: Question L80 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">题号 L80 · 确定性工作流与自主智能体的本质区别与容错成本</h3>
+      <span class="q-badge">Workflow vs Agent · 决策时机 · Prompt 职责最小化</span>
+    </div>
+    <div class="q-scenario">
+      <strong>考察领域：</strong>二_Agent应用开发相关 / 1.agent宏观认知 (Depth 1)
+    </div>
+    <ol class="q-items">
+      <li>在大模型应用落地中，确定性工作流（Workflow）与自主智能体（Agent）在<strong>业务场景选择、决策机制及容错成本</strong>上有何本质区别？</li>
+      <li>结合 TripPlanner 项目中从早期“全 Agent 提示词弱约束”向“确定性图编排（Workflow）+ 最小职责 LLM（Agent）”演进的架构重构，谈谈你是如何设计两者的边界与 Prompt 调优策略的？</li>
+    </ol>
+    <div class="user-answer-box">
+      “在旅游场景下肯定走 Workflow。早期全 LLM 决策导致延迟爆炸和严重幻觉（单纯依赖模型内部参数编造，而非真实 API 与空间算法）。追求的原则是‘后端任务交后端，LLM 擅长的语义理解和文案修饰交 LLM’。因此没有给 Agent 复杂结构或工具，把它当成修饰的旁枝。而如果是 Coding Agent，则需要开放高自由度、设计沙箱安全、编写低 Token 消耗工具、使用 ReAct / Tree of Thoughts 与 Checkpoint 回退。（向面试官请教：复习 SqliteSaver 断点续传与 Checkpoint 机制）”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 四维量化打分与代码事实点评</div>
+      <div class="critique-content">
+        <table>
+          <thead>
+            <tr><th>维度</th><th>得分 (1-5)</th><th>依据</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>概念理解</strong></td><td><strong>4.5</strong></td><td>深刻阐述了 Workflow（代码决定流程、确定性高）与自主 Agent（模型决定流程、需沙箱与复杂容错）的本质分野。</td></tr>
+            <tr><td><strong>原理深度</strong></td><td><strong>4.0</strong></td><td>精准指出“全 LLM &rarr; 最小职责 LLM”的演进动因（时延爆炸与参数幻觉），Prompt 采用单天文案润色与 JSON Mode 强约束。</td></tr>
+            <tr><td><strong>落地证据</strong></td><td><strong>3.5</strong></td><td>准确阐明了高德+运筹算法负责确定性计算、Agent 负责文案的架构，但对断点续传（SqliteSaver）具体机制略有遗忘。</td></tr>
+            <tr><td><strong>结构完整度</strong></td><td><strong>4.0</strong></td><td>走完了决策时机对比 &rarr; 容错成本与场景权衡 &rarr; Prompt 最小化职责演进全流程。</td></tr>
+          </tbody>
+        </table>
+        <ul>
+          <li><strong>答对</strong>：精准指出 Workflow 是“开发期代码决定流程”，自主 Agent 是“运行期模型自主决策”；透彻阐述了“确定性算法下沉、LLM 最小职责”的去幻觉与降耗价值。</li>
+          <li><strong>答漏</strong>：遗漏了项目中的 6 层运行期护栏（指数退避重试、硬软伤分级校验、<code>Annotated[list, add]</code> 错误累积、本地静态模板兜底、SqliteSaver 断点续传、前端透明面板）。</li>
+          <li><strong>证据锚点</strong>：<code>app/graph/builder.py:110</code>（<code>open_trip_graph</code> 挂载 <code>SqliteSaver</code>）、<code>app/graph/nodes.py:532-589</code>（<code>_format_day_prompt</code> 单天只输出文案 JSON）。</li>
+        </ul>
+      </div>
+    </div>
+    <div style="margin-top: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 18px;">
+      <strong style="color: #0f172a; font-size: 13.5px;">🛠️ 核心机制复习：TripPlanner 中的 SqliteSaver 断点续传与 Checkpoint</strong>
+      <ol style="margin-left: 18px; margin-top: 6px; font-size: 13px; color: #334155; line-height: 1.6;">
+        <li><strong>底层实现（<code>builder.py:110-135</code>）</strong>：采用 LangGraph 原生 <code>SqliteSaver</code>，将运行时持久化写入 <code>data/checkpoints.db</code>，传入 <code>config = {"configurable": {"thread_id": trip_id}}</code>。LangGraph 在每一个 Superstep / Node 执行完毕后，自动将当前的 <code>TripPlannerState</code> 序列化写入 SQLite。</li>
+        <li><strong>断点续传业务价值</strong>：如果用户在规划 5 天行程时，第 3 天遇到网络异常断开，下一次传入同一个 <code>trip_id</code> 调用 <code>graph.invoke(None, config)</code> 时，LangGraph 会<strong>自动从最近一次成功的 Checkpoint 加载 State，仅继续执行未完成的后续天数</strong>，无需重新检索高德或重跑 Day 1/2。</li>
+        <li><strong>连接池管理（防 fd 泄漏）</strong>：<code>open_trip_graph</code> 每次新建连接并返回 <code>(graph, conn)</code>，由 API 层在 <code>try...finally: conn.close()</code> 中显式关闭，防止 SQLite 出现连接泄漏。</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- Phase 2 Summary Table -->
+  <section class="card">
+    <h3 class="section-title">🏆 第二阶段 · project-mock-interview 综合评定</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>题号</th>
+          <th>题目领域</th>
+          <th>概念理解</th>
+          <th>原理深度</th>
+          <th>落地证据</th>
+          <th>结构完整度</th>
+          <th>综合总分</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>L9</strong></td>
+          <td>Agent 框架开发（编排与选型）</td>
+          <td>4.5</td>
+          <td>3.5</td>
+          <td>3.0</td>
+          <td>3.5</td>
+          <td><strong style="color: #059669;">3.63</strong></td>
+        </tr>
+        <tr>
+          <td><strong>L62</strong></td>
+          <td>RAG 系统搭建（多源知识协同）</td>
+          <td>4.5</td>
+          <td>4.0</td>
+          <td>3.5</td>
+          <td>3.5</td>
+          <td><strong style="color: #059669;">3.88</strong></td>
+        </tr>
+        <tr>
+          <td><strong>L80</strong></td>
+          <td>Prompt 调优与确定性架构</td>
+          <td>4.5</td>
+          <td>4.0</td>
+          <td>3.5</td>
+          <td>4.0</td>
+          <td><strong style="color: #059669;">4.00</strong></td>
+        </tr>
+        <tr style="background: #f1f5f9; font-weight: 700;">
+          <td><strong>均分</strong></td>
+          <td><strong>全场平均表现</strong></td>
+          <td><strong>4.50</strong></td>
+          <td><strong>3.83</strong></td>
+          <td><strong>3.33</strong></td>
+          <td><strong>3.67</strong></td>
+          <td><strong style="color: #2563eb; font-size: 15px;">3.83 / 5.0</strong></td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top: 14px; padding: 12px 16px; background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 0 6px 6px 0; font-size: 13px; color: #334155;">
+  <!-- Phase 2: Question L264 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">题号 L264 · 检索召回优化与轻量 RAG 实践</h3>
+      <span class="q-badge">混合检索 · Query 意图增强 · BM25 词频计算</span>
+    </div>
+    <div class="q-scenario">
+      <strong>考察领域：</strong>二_Agent应用开发相关 / 9.业务评估(性能优化与诊断) (Depth 3)
+    </div>
+    <ol class="q-items">
+      <li>在企业级 RAG 系统落地中，业界常见的召回优化手段有哪些（如 Query 改写、词法+语义双路召回、重排 Reranking 等）？</li>
+      <li>结合 TripPlanner 项目中为什么选择“Bigram BM25 + Query 意图词增强（<code>景点+玩法</code>）”而不用纯向量检索，谈谈你在轻量 RAG 召回上的具体实践与思考？</li>
+    </ol>
+    <div class="user-answer-box">
+      “核心逻辑偏向于正则关键词检索，加上语义检测，加上意图理解。要从 Query 入手，将传入数据进行关键词化、意图化或语义化。如果是轻量级场景直接用轻量方法。实践中主要基于用户体验出发，RAG 负责的不是核心业务决策（核心由高德与运筹算法负责），更多是锦上添花、提供更好体验的过程。因此对速度和延迟要求高，对过于复杂的语义模型要求适中。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 四维量化打分与代码事实点评</div>
+      <div class="critique-content">
+        <table>
+          <thead>
+            <tr><th>维度</th><th>得分 (1-5)</th><th>依据</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>概念理解</strong></td><td><strong>3.5</strong></td><td>准确把握了 Query 意图化与关键词化的价值，以及轻量 RAG 场景下“低延迟、零冷启动”的工程直觉；但对业界标准优化手段（双路召回、Rerank、HyDE）阐述较泛。</td></tr>
+            <tr><td><strong>原理深度</strong></td><td><strong>3.5</strong></td><td>能够清晰论述“RAG 作为非主干辅助信息源”的权衡；但未展开 BM25 词频计算（TF-IDF）与 Bigram 解决中文未登录词分词的机理。</td></tr>
+            <tr><td><strong>落地证据</strong></td><td><strong>4.0</strong></td><td>深刻契合 TripPlanner 中 GuideRAG 的定位（经验供给、失败返回空列表降级不阻断主图）。</td></tr>
+            <tr><td><strong>结构完整度</strong></td><td><strong>3.5</strong></td><td>走完了场景切入 &rarr; 工程权衡两步，缺少业界四步体系中的“业界通用召回范式体系化对比”。</td></tr>
+          </tbody>
+        </table>
+        <ul>
+          <li><strong>答对</strong>：准确指出 RAG 在本系统中的定位是“增强体验”而非“核心决策主干”，因此追求毫秒级响应与零基础设施负担。</li>
+          <li><strong>答漏</strong>：遗漏了业界应对召回不足的 4 大经典手段：① Query 改写/扩展；② 混合双路召回（Dense Vector + Sparse BM25）；③ 重排过滤（Cross-Encoder Reranker）；④ 假设文档嵌入（HyDE）。</li>
+          <li><strong>证据锚点</strong>：<code>backend/app/services/guide_rag.py:121-124</code>（Query 增强 <code>景点名 + 玩法</code>）、<code>guide_rag.py:27-37</code>（Bigram 分词器）、<code>guide_rag.py:92-140</code>（候选过滤 + 段落级 BM25 打分）。</li>
+          <li><strong>追问</strong>：如果在海量（百万级）非结构化文档库中，BM25 词法检索经常遇到“同义词无法命中”的问题，业界通常如何引入向量数据库（如 HNSW 索引）来解决？</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Phase 2: Question L30 -->
+  <section class="card">
+    <div class="q-header">
+      <h3 style="font-size: 16px; font-weight: 700;">题号 L30 · Query 改写与时序架构设计</h3>
+      <span class="q-badge">RAG Pipeline · Query 改写 · 前置意图转换</span>
+    </div>
+    <div class="q-scenario">
+      <strong>考察领域：</strong>二_Agent应用开发相关 / 6.agent处理情景的架构设计 (Depth 3)
+    </div>
+    <ol class="q-items">
+      <li>在 Agent / RAG Pipeline 中，Query 改写（Query Rewriting / Expansion）模块最适合放在哪个阶段？</li>
+      <li>结合 TripPlanner 项目中对用户口语化偏好的处理，谈谈你是如何设计“检索前改写（影响召回）”与“生成前改写（影响约束）”的两阶段落地的？为什么选择本地规则改写而非每次调用大模型进行改写？</li>
+    </ol>
+    <div class="user-answer-box">
+      “Query 改写本质是把传入的参数进行翻译改写。检索前改写通常有两种方案：一种是直接匹配正则关键词并在后端模板中找，依赖后端数据丰富度，速度极快；另一种方案是用小模型（如 Flash 模型）低 Token、低延迟进行语义理解与意图识别后再传给 RAG 检索器。生成阶段再加模型对召回数据进行优化和排版。”
+    </div>
+    <div class="critique-box">
+      <div class="critique-title">💡 四维量化打分与代码事实点评</div>
+      <div class="critique-content">
+        <table>
+          <thead>
+            <tr><th>维度</th><th>得分 (1-5)</th><th>依据</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>概念理解</strong></td><td><strong>4.0</strong></td><td>直觉敏锐，准确提出了业界最主流的两大改写路线：“本地规则模板（零耗时）” vs “小参数模型 SLM / Flash（语义增强）”。</td></tr>
+            <tr><td><strong>原理深度</strong></td><td><strong>3.5</strong></td><td>清晰阐述了改写对下游检索与生成排版的影响；但对生成前的“结构化画像 &rarr; Prompt 约束指令改写”展开较少。</td></tr>
+            <tr><td><strong>落地证据</strong></td><td><strong>3.5</strong></td><td>能够结合模板与小模型方案论述，但未点出 TripPlanner 中 _build_profile_constraints 与 guide_rag 意图词扩展的具体代码。</td></tr>
+            <tr><td><strong>结构完整度</strong></td><td><strong>3.5</strong></td><td>走完了概念定义 &rarr; 两大工程方案对比 &rarr; 前后时序权衡。</td></tr>
+          </tbody>
+        </table>
+        <ul>
+          <li><strong>答对</strong>：精准指出检索前改写的两大主流流派（规则提取 vs 轻量 Flash 小模型），理解改写对 RAG 召回的核心决定性作用。</li>
+          <li><strong>答漏</strong>：遗漏了 TripPlanner 中非常精妙的<strong>生成前改写（Pre-Generation Rewriting）</strong>：将结构化画像标签（<code>diet: ["不吃辣"]</code>）改写为 Prompt 自然语言强约束指令（“全天推荐避开辛辣餐厅，优先推荐清淡菜系”）。</li>
+          <li><strong>证据锚点</strong>：<code>guide_rag.py:121-124</code>（检索侧改写：将纯景点名扩展为 <code>景点名 + 玩法</code>）、<code>app/graph/nodes.py:574-576</code>（生成侧改写：<code>_build_profile_constraints</code> 将画像转化为自然语言硬约束指令）。</li>
+          <li><strong>选型理由</strong>：规则模板在内存中耗时 &lt; 0.1ms，避免长链路多出 2 次串行 LLM 网络 I/O，且 100% 确定性无语义漂移。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Phase 2 Final Summary Table -->
+  <section class="card">
+    <h3 class="section-title">🏆 第二阶段 · project-mock-interview 最终综合评定</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>题号</th>
+          <th>题目领域</th>
+          <th>概念理解</th>
+          <th>原理深度</th>
+          <th>落地证据</th>
+          <th>结构完整度</th>
+          <th>综合总分</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>L9</strong></td>
+          <td>Agent 框架开发（编排与选型）</td>
+          <td>4.5</td>
+          <td>3.5</td>
+          <td>3.0</td>
+          <td>3.5</td>
+          <td><strong style="color: #059669;">3.63</strong></td>
+        </tr>
+        <tr>
+          <td><strong>L62</strong></td>
+          <td>RAG 系统搭建（多源知识协同）</td>
+          <td>4.5</td>
+          <td>4.0</td>
+          <td>3.5</td>
+          <td>3.5</td>
+          <td><strong style="color: #059669;">3.88</strong></td>
+        </tr>
+        <tr>
+          <td><strong>L80</strong></td>
+          <td>Prompt 调优与确定性架构</td>
+          <td>4.5</td>
+          <td>4.0</td>
+          <td>3.5</td>
+          <td>4.0</td>
+          <td><strong style="color: #059669;">4.00</strong></td>
+        </tr>
+        <tr>
+          <td><strong>L264</strong></td>
+          <td>RAG 检索召回与工程优化</td>
+          <td>3.5</td>
+          <td>3.5</td>
+          <td>4.0</td>
+          <td>3.5</td>
+          <td><strong style="color: #059669;">3.63</strong></td>
+        </tr>
+        <tr>
+          <td><strong>L30</strong></td>
+          <td>Query 改写与时序架构设计</td>
+          <td>4.0</td>
+          <td>3.5</td>
+          <td>3.5</td>
+          <td>3.5</td>
+          <td><strong style="color: #059669;">3.63</strong></td>
+        </tr>
+        <tr style="background: #f1f5f9; font-weight: 700;">
+          <td><strong>均分</strong></td>
+          <td><strong>Phase 2 全场平均表现</strong></td>
+          <td><strong>4.20</strong></td>
+          <td><strong>3.70</strong></td>
+          <td><strong>3.50</strong></td>
+          <td><strong>3.60</strong></td>
+          <td><strong style="color: #2563eb; font-size: 15px;">3.75 / 5.0</strong></td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top: 14px; padding: 12px 16px; background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 0 6px 6px 0; font-size: 13px; color: #334155;">
+      <strong>面试官终审评语：</strong>
+      候选人在 Agent 系统架构、Prompt 最小职责、多源知识融合以及工程容灾降级方面具备非常成熟的全局视野和设计直觉，能够快速洞察到大模型非确定性与业务确定性之间的矛盾并给出“工程算法下沉”的解法。在后续面试中，建议针对 RAG 经典术语（如双路召回、Rerank）以及具体代码位置的记忆做进一步强化，即可在技术面试中展现出极强的工业级说服力。
+    </div>
+  </section>
+
+  <!-- Phase 3: System Resilience & Quality Engineering -->
+  <section class="card">
+    <h3 class="section-title">🛡️ 第三阶段 · 系统韧性、高并发治理与质量工程深度复盘</h3>
+    
+    <div style="margin-bottom: 20px;">
+      <h4 style="font-size: 15px; color: #1e293b; margin-bottom: 8px;">1. 全局单例线程池（max_workers=10）与死锁防御</h4>
+      <ul style="padding-left: 20px; font-size: 13.5px; color: #334155; line-height: 1.7;">
+        <li><strong>为什么并发量呈乘积形式？</strong> 用户传入 5 个偏好，外层发起 5 路并发周边搜索；每路返回 10 个 POI，内层对 10 个 POI 并发调用 <code>maps_geo</code> 补坐标。瞬间并发峰值达到 $5 \times 10 = 50$ 路！高德免费 Key 上限仅 20~25 QPS，若不限流会瞬间被 429 熔断击穿。</li>
+        <li><strong>为什么单例池只接叶子任务可防死锁？</strong> 若把外层父任务也提交进池，10 个父任务占满线程池后需要等待子任务执行，但子任务在队列中等待父任务释放线程 &rarr; <strong>父等子、子等父，发生经典的线程池饥饿死锁（Thread Starvation Deadlock）</strong>。本项目规定全局池<strong>只接收原子级 <code>mcp.run</code> 叶子任务</strong>，父任务在外部线程运行，彻底消除嵌套依赖。</li>
+      </ul>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <h4 style="font-size: 15px; color: #1e293b; margin-bottom: 8px;">2. LLM 指数退避（Exponential Backoff）与 Jitter 防惊群</h4>
+      <ul style="padding-left: 20px; font-size: 13.5px; color: #334155; line-height: 1.7;">
+        <li><strong>退避时间序列：</strong> $\text{Delay} = 1\text{s} \times 2^i + \text{random}(0, 0.5)$ 秒（即第 1 次 $\approx 1\text{s}$，第 2 次 $\approx 2\text{s}$，第 3 次 $\approx 4\text{s}$）。</li>
+        <li><strong>为什么必须加 Jitter（随机抖动）？</strong> 当 5 个 Day Agent 并发执行遇到网络抖动同时失败时，若无 Jitter，所有 Agent 会在<strong>完全相同的第 1.000 秒同时重试</strong>，引发<strong>惊群效应（Thundering Herd）</strong>再度击垮接口；Jitter 将 5 个请求的重试时机随机打散（如 1.08s, 1.23s, 1.45s...），平滑流量尖峰。</li>
+      </ul>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <h4 style="font-size: 15px; color: #1e293b; margin-bottom: 8px;">3. SSE 客户端断开取消与连接池安全</h4>
+      <ul style="padding-left: 20px; font-size: 13.5px; color: #334155; line-height: 1.7;">
+        <li><strong>断连异常捕获：</strong> 客户端关闭网页时，ASGI 抛出 <code>asyncio.CancelledError</code>。</li>
+        <li><strong>后台任务终止：</strong> 后端捕获后立即触发 <code>cancel_event.set()</code>，通知后台线程中止后续 LangGraph 节点计算与 Token 浪费。</li>
+        <li><strong>显式 conn.close()：</strong> <code>try...finally: conn.close()</code> 确保即使发生中途断连，每个请求独享的 SQLite 连接也能安全释放，杜绝文件描述符（fd）泄漏。</li>
+      </ul>
+    </div>
+
+    <div>
+      <h4 style="font-size: 15px; color: #1e293b; margin-bottom: 8px;">4. 60 个离线测试捕获的 5 大隐蔽缺陷</h4>
+      <ul style="padding-left: 20px; font-size: 13.5px; color: #334155; line-height: 1.7;">
+        <li><strong>测试基线：</strong> 基于 <code>FakeAmapWrapper</code>、<code>FakeLLMService</code> 和 <code>FakeRepository</code>，实现 0 网络依赖、0 Token 消耗、<strong>0.8 秒全量跑完 60 个用例</strong>。</li>
+        <li><strong>LangGraph fan-in 双触发：</strong> 早期 <code>memory</code>（1步结束）与 <code>attraction</code>（2步结束）汇聚时，因处于不同 Superstep 导致 <code>planner</code> 节点被重复执行 2 次。v3 改为 Send API 动态扇出与 Reducer 一次性规约彻底根治。</li>
+        <li><strong>高德 POI 缺坐标：</strong> <code>maps_text_search</code> 缺少 <code>location</code> 导致聚类崩溃，测试捕获后在 Wrapper 内增加并发 <code>maps_geo</code> 自动补齐。</li>
+        <li><strong>画像 None 击穿：</strong> 新用户字段为 None 引发 KeyError，增加字典兜底。</li>
+        <li><strong>LLM 坐标幻觉：</strong> 编造坐标偏差 1300km，彻底废除 LLM 坐标生成。</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+</body>
+</html>
+
+
+
+
+
