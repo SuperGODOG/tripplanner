@@ -24,6 +24,22 @@
           </div>
         </div>
         <div class="header-right">
+          <!-- ⚡ 引擎切换器 -->
+          <div class="engine-switch" title="选择核心规划调度引擎">
+            <button
+              :class="['btn-engine', selectedEngine === 'harness' ? 'active' : '']"
+              @click="selectedEngine = 'harness'"
+            >
+              ⚡ Harness 极速 (2.4s)
+            </button>
+            <button
+              :class="['btn-engine', selectedEngine === 'langgraph' ? 'active' : '']"
+              @click="selectedEngine = 'langgraph'"
+            >
+              🌐 LangGraph 稳定版
+            </button>
+          </div>
+
           <span class="session-badge" title="当前会话 ID">
             <span class="pulse-dot"></span> {{ sessionId.slice(0, 8) }}...
           </span>
@@ -458,6 +474,7 @@ const effectiveRequirements = ref({ slots: {}, locked_items: [], revision_id: 1 
 const currentPlan = ref(null)
 const lockedItems = ref([])
 const attemptedActions = ref([])
+const selectedEngine = ref('harness') // 'harness' | 'langgraph'
 
 const quickPrompts = [
   '我想去北京玩3天，预算5000元',
@@ -581,14 +598,22 @@ async function sendChatRequest(text, actionPayload = null) {
   scrollToBottom()
 
   try {
-    const payload = {
-      session_id: sessionId.value,
-      input_text: text || '',
-      action_type: actionPayload ? 'SET_SLOT' : null,
-      action_payload: actionPayload,
-    }
+    const isHarness = selectedEngine.value === 'harness'
+    const endpoint = isHarness ? '/api/harness/stream' : '/api/session/chat'
+    const payload = isHarness
+      ? {
+          session_id: sessionId.value,
+          input_text: text || '',
+          requirements: effectiveRequirements.value?.slots || null,
+        }
+      : {
+          session_id: sessionId.value,
+          input_text: text || '',
+          action_type: actionPayload ? 'SET_SLOT' : null,
+          action_payload: actionPayload,
+        }
 
-    const res = await fetch('/api/session/chat', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -638,21 +663,46 @@ async function sendChatRequest(text, actionPayload = null) {
           assistantMsg.thinking.push(parsed)
           currentThinking.value.push(parsed)
           scrollToBottom()
+        } else if (eventName === 'tool_start') {
+          const tName = parsed.tool || 'algorithm'
+          const info = { step: 'tool_start', detail: `🛠️ 调度算法: ${tName}` }
+          assistantMsg.thinking.push(info)
+          currentThinking.value.push(info)
+          scrollToBottom()
+        } else if (eventName === 'tool_end') {
+          const tSummary = parsed.summary || ''
+          const tMs = parsed.duration_ms !== undefined ? ` (${parsed.duration_ms}ms)` : ''
+          const info = { step: 'tool_end', detail: `✅ 完成: ${tSummary}${tMs}` }
+          assistantMsg.thinking.push(info)
+          currentThinking.value.push(info)
+          scrollToBottom()
+        } else if (eventName === 'invariant_violation') {
+          const vList = parsed.violations || []
+          const info = { step: 'invariant_violation', detail: `🛡️ 不变式拦截: ${vList.join('; ')}` }
+          assistantMsg.thinking.push(info)
+          currentThinking.value.push(info)
+          scrollToBottom()
         } else if (eventName === 'clarification') {
           assistantMsg.clarification = parsed
           scrollToBottom()
-        } else if (eventName === 'message') {
-          assistantMsg.content = parsed.content || parsed
+        } else if (eventName === 'message' || eventName === 'message_delta') {
+          const txt = parsed.delta !== undefined ? parsed.delta : (parsed.content || parsed)
+          if (eventName === 'message_delta') {
+            assistantMsg.content = (assistantMsg.content || '') + txt
+          } else {
+            assistantMsg.content = txt
+          }
           scrollToBottom()
           saveSessionCache()
         } else if (eventName === 'plan_version') {
-          currentPlan.value = parsed
+          currentPlan.value = parsed.plan || parsed
           if (parsed.locked_items) {
             lockedItems.value = parsed.locked_items
           }
           saveSessionCache()
-          // 同步会话状态以获取最新 slots
-          fetchSessionState()
+          if (!isHarness) {
+            fetchSessionState()
+          }
         } else if (eventName === 'done') {
           assistantMsg.isStreaming = false
           assistantMsg.isThinkingOpen = false
@@ -949,6 +999,35 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.engine-switch {
+  display: flex;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+}
+.btn-engine {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-engine:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.05);
+}
+.btn-engine.active {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.85), rgba(168, 85, 247, 0.85));
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
 }
 .session-badge {
   font-size: 12px;
