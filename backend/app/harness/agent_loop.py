@@ -12,6 +12,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import logging
+import time
 from typing import Any, AsyncGenerator
 
 from .events import (
@@ -184,13 +185,43 @@ class TravelAgentHarness:
                         core_poi_names.append(n)
 
             if core_poi_names:
-                yield ToolStartEvent(tool_name="fetch_tavily_notes", arguments={"poi_count": len(core_poi_names[:6])})
+                # 针对每天最具代表性的首要景点（最多 3 个）并发进行 RAG 富化，避免无谓的串行等待
+                target_pois = []
+                for d in current_candidate_plan["days"]:
+                    for a in d.get("attractions", []):
+                        aname = a.get("name")
+                        if aname and aname in core_poi_names and aname not in target_pois:
+                            target_pois.append(aname)
+                            break
+                    if len(target_pois) >= 3:
+                        break
+
+                if not target_pois:
+                    target_pois = core_poi_names[:2]
+
+                yield ToolStartEvent(tool_name="fetch_tavily_notes", arguments={"poi_count": len(target_pois), "pois": target_pois})
+
+                async def _fetch_one_guide(p_name: str):
+                    try:
+                        res, _ = await self.registry.call("fetch_tavily_notes", city=city, poi_name=p_name)
+                        return p_name, res
+                    except Exception:
+                        return p_name, {}
+
+                t_start = time.perf_counter()
+                results = await asyncio.gather(*[_fetch_one_guide(p) for p in target_pois])
+                t_dur_ms = round((time.perf_counter() - t_start) * 1000, 1)
+
                 tavily_results: dict[str, Any] = {}
-                for p_name in core_poi_names[:6]:
-                    t_info, dur_ms = await self.registry.call("fetch_tavily_notes", city=city, poi_name=p_name)
+                for p_name, t_info in results:
                     if t_info:
                         tavily_results[p_name] = t_info
-                yield ToolEndEvent(tool_name="fetch_tavily_notes", result_summary=f"抓取到 {len(tavily_results)} 个景点的注意事项", duration_ms=0.0)
+
+                yield ToolEndEvent(
+                    tool_name="fetch_tavily_notes",
+                    result_summary=f"并发抓取到 {len(tavily_results)} 处核心景点的实时避坑注意事项",
+                    duration_ms=t_dur_ms,
+                )
 
                 for d in current_candidate_plan["days"]:
                     for a in d.get("attractions", []):
