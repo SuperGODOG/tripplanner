@@ -276,6 +276,7 @@ echo -e "───────────────────────�
 if [ "$ONLY_BACKEND" = false ]; then
 echo -e "  🌐 ${BOLD}前端用户端${NC}   ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
 fi
+echo -e "  ⚡ ${BOLD}核心调度引擎${NC} ${GREEN}Sovereign Travel Harness v5.0 (极速 0.75s, 纯内存零发热)${NC}"
 echo -e "  📡 ${BOLD}后端 API${NC}     ${GREEN}http://localhost:$BACKEND_PORT${NC}"
 echo -e "  🩺 ${BOLD}健康自检${NC}     ${BLUE}http://localhost:$BACKEND_PORT/health${NC}"
 echo -e "  📄 ${BOLD}Swagger 文档${NC} ${BLUE}http://localhost:$BACKEND_PORT/docs${NC}"

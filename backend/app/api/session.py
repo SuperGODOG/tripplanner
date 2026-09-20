@@ -1,25 +1,21 @@
 """多轮会话 API 与 SSE 流式协议接口 (Session API & SSE Streaming)
 
-提供生产级多轮对话入口，支持：
+由 Sovereign Harness 极速内核独占驱动 (亚秒级响应，零发热，完全解耦 LangGraph)：
 1. Server-Sent Events (SSE) 流式传输（思考进度、未决澄清卡片、行程版本 JSON、Markdown 正文流）；
-2. LangGraph 原生 `interrupt` 挂起与基于 `thread_id` 的断点恢复；
-3. 会话状态快照与三轨数据（需求卡片、锁定项、行程版本、历史消息）查询。
+2. 纯内存三轨状态原子持久化（需求卡片、锁定项、行程版本、历史消息）；
+3. LangGraph 状态机架构已正式退役为旁路废案，生产 API 彻底实现 0 耦合。
 """
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, AsyncGenerator, Generator
+from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Header
+from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from langgraph.types import Command
-from langgraph.checkpoint.memory import InMemorySaver
 
-from ..graph.session_graph import build_session_graph, SessionGraphState
-from ..models.session import EffectiveRequirements, PlanVersion
 from ..harness.agent_loop import TravelAgentHarness
 from ..harness.registry import travel_tools
 from ..harness.session_store import harness_session_store
@@ -27,14 +23,6 @@ from ..harness.session_store import harness_session_store
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/session", tags=["session"])
-
-# 全局共享 Session Graph 单例（仅供 legacy 对照与测试使用）
-_session_saver = InMemorySaver()
-_session_graph = build_session_graph(checkpointer=_session_saver)
-
-
-def get_session_graph():
-    return _session_graph
 
 
 class ChatRequest(BaseModel):
@@ -44,7 +32,7 @@ class ChatRequest(BaseModel):
     input_text: str = ""
     action_type: str | None = None  # "SET_SLOT" | "RESUME" | None
     action_payload: dict[str, Any] | None = None  # 如 {"key": "city", "value": "北京"}
-    engine: str | None = None  # "harness" (默认极速版) | "langgraph" (遗留对比版)
+    engine: str | None = None  # 兼容保留字段: "harness" (独占生产引擎) | "langgraph" (已废弃并自动接管)
 
 
 def _format_sse(event: str, data: Any) -> str:
@@ -57,149 +45,42 @@ def _format_sse(event: str, data: Any) -> str:
 async def session_chat(request: ChatRequest, x_engine: str | None = Header(None)):
     """统一多轮会话流式交互端点 (SSE)
 
-    默认由 Sovereign Harness 极速内核驱动 (0.75s 亚秒级响应，纯内存零发热)，
-    亦可通过 engine='langgraph' 或请求头 X-Engine: langgraph 降级至旧版状态机。
+    由 Sovereign Harness 极速内核独占驱动 (0.75s 亚秒级响应，纯内存零发热)，
+    原 LangGraph 状态机已正式退役成废案并拔除耦合。
     """
     target_engine = (request.engine or x_engine or "harness").lower().strip()
+    if target_engine == "langgraph":
+        logger.info("LangGraph 状态机已正式退役解耦，已自动由 Sovereign Harness 接管请求 [%s]", request.session_id)
 
-    if target_engine != "langgraph":
-        # ── Sovereign Harness 极速主通道 ──
-        harness = TravelAgentHarness(registry=travel_tools)
+    # ── Sovereign Harness 极速主通道 ──
+    harness = TravelAgentHarness(registry=travel_tools)
 
-        async def harness_event_stream():
-            try:
-                async for event in harness.run(
-                    session_id=request.session_id,
-                    user_input=request.input_text,
-                    action_type=request.action_type,
-                    action_payload=request.action_payload,
-                ):
-                    if event.event_type == "message_delta":
-                        yield _format_sse("message", {"content": event.payload.get("delta", "")})
-                    elif event.event_type == "plan_version":
-                        plan_payload = event.payload.get("plan", {})
-                        yield _format_sse("plan_version", plan_payload)
-                    elif event.event_type == "clarification":
-                        yield _format_sse("clarification", event.payload)
-                    elif event.event_type == "done":
-                        yield _format_sse("done", event.payload)
-                    else:
-                        yield _format_sse(event.event_type, event.to_sse_dict())
-            except Exception as e:
-                logger.exception("Harness 会话流式执行异常: %s", e)
-                yield _format_sse("error", {"error": str(e), "session_id": request.session_id})
-                yield _format_sse("done", {"status": "error"})
-
-        return StreamingResponse(
-            harness_event_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-
-    # ── 遗留 LangGraph 状态机通道 (供对比研究) ──
-    graph = get_session_graph()
-    thread_id = request.session_id
-    config = {"configurable": {"thread_id": thread_id}}
-
-    def legacy_event_stream() -> Generator[str, None, None]:
-        yield _format_sse("thinking", {"step": "init", "detail": "正在接入 LangGraph 协同网络..."})
-
-        # 检查当前线程是否存在未决的 interrupt
-        current_state = graph.get_state(config)
-        is_interrupted = False
-        if current_state.tasks:
-            for task in current_state.tasks:
-                if task.interrupts:
-                    is_interrupted = True
-                    break
-
+    async def harness_event_stream():
         try:
-            if is_interrupted:
-                # 处于挂起态，执行恢复
-                yield _format_sse("thinking", {"step": "resuming", "detail": "收到补全信息，正在恢复行程规划..."})
-                resume_payload = request.action_payload if request.action_payload is not None else request.input_text
-                stream_generator = graph.stream(
-                    Command(resume=resume_payload),
-                    config=config,
-                    stream_mode="updates",
-                )
-            else:
-                # 正常新轮次执行
-                yield _format_sse("thinking", {"step": "clarification", "detail": "正在解析出行意图、天数与偏好约束..."})
-                # 读取已有需求或新建
-                existing_req = current_state.values.get("requirements") if current_state.values else None
-                existing_locks = current_state.values.get("locked_items") if current_state.values else []
-                existing_messages = list(current_state.values.get("messages", [])) if current_state.values else []
-
-                if request.input_text:
-                    existing_messages.append({"role": "user", "content": request.input_text})
-
-                input_state: SessionGraphState = {
-                    "session_id": request.session_id,
-                    "user_id": request.user_id,
-                    "thread_id": thread_id,
-                    "input_text": request.input_text,
-                    "messages": existing_messages,
-                    "requirements": existing_req or {},
-                    "locked_items": existing_locks,
-                }
-                stream_generator = graph.stream(
-                    input_state,
-                    config=config,
-                    stream_mode="updates",
-                )
-
-            # 遍历图流式产出
-            plan_version_emitted = False
-            for chunk in stream_generator:
-                # 1. 捕获中断
-                if "__interrupt__" in chunk:
-                    interrupts = chunk["__interrupt__"]
-                    if interrupts:
-                        prompt_info = interrupts[0].value
-                        yield _format_sse("clarification", prompt_info)
-                        yield _format_sse("done", {"status": "waiting_clarification"})
-                        return
-
-                # 2. 捕获规划求解与自愈进度
-                if "planner_node" in chunk:
-                    yield _format_sse("thinking", {"step": "planning", "detail": "正在生成最优景点分日与游览路线..."})
-                elif "diagnose_node" in chunk:
-                    yield _format_sse("thinking", {"step": "diagnosing", "detail": "正在核验行程预算与景点开放约束..."})
-                elif "repair_node" in chunk:
-                    yield _format_sse("thinking", {"step": "repairing", "detail": "检测到行程硬伤冲突，Repair Agent 正在执行闭环自愈优化..."})
-                elif "output_node" in chunk:
-                    output_data = chunk["output_node"]
-                    final_plan = output_data.get("current_plan") or graph.get_state(config).values.get("current_plan")
-                    if final_plan and not plan_version_emitted:
-                        yield _format_sse("plan_version", final_plan)
-                        plan_version_emitted = True
-
-                    final_response = output_data.get("final_response", "")
-                    if final_response:
-                        yield _format_sse("message", {"content": final_response})
-
-            # 结束信号
-            # 补发 plan_version (若 output_node 未直接捕获)
-            if not plan_version_emitted:
-                latest_state = graph.get_state(config)
-                final_plan = latest_state.values.get("current_plan") if latest_state.values else None
-                if final_plan:
-                    yield _format_sse("plan_version", final_plan)
-
-            yield _format_sse("done", {"status": "completed"})
-
+            async for event in harness.run(
+                session_id=request.session_id,
+                user_input=request.input_text,
+                action_type=request.action_type,
+                action_payload=request.action_payload,
+            ):
+                if event.event_type == "message_delta":
+                    yield _format_sse("message", {"content": event.payload.get("delta", "")})
+                elif event.event_type == "plan_version":
+                    plan_payload = event.payload.get("plan", {})
+                    yield _format_sse("plan_version", plan_payload)
+                elif event.event_type == "clarification":
+                    yield _format_sse("clarification", event.payload)
+                elif event.event_type == "done":
+                    yield _format_sse("done", event.payload)
+                else:
+                    yield _format_sse(event.event_type, event.to_sse_dict())
         except Exception as e:
-            logger.error("LangGraph 会话流式执行异常: %s", e, exc_info=True)
-            yield _format_sse("error", {"error": str(e), "message": "会话执行出现异常，已为您保留当前状态"})
+            logger.exception("Harness 会话流式执行异常: %s", e)
+            yield _format_sse("error", {"error": str(e), "session_id": request.session_id})
             yield _format_sse("done", {"status": "error"})
 
     return StreamingResponse(
-        legacy_event_stream(),
+        harness_event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -213,38 +94,6 @@ async def session_chat(request: ChatRequest, x_engine: str | None = Header(None)
 async def get_session_state(session_id: str):
     """查询指定会话的当前三轨状态快照
 
-    优先读取极速 HarnessSessionStore；未命中时兜底查询 LangGraph 状态机。
+    纯内存极速 HarnessSessionStore，单轮毫秒级读取，100% 独立于外部图框架。
     """
-    # 1. 优先 HarnessStore
-    if session_id in harness_session_store._store:
-        return harness_session_store.to_frontend_state(session_id)
-
-    # 2. 兜底 LangGraph
-    graph = get_session_graph()
-    config = {"configurable": {"thread_id": session_id}}
-    state_snapshot = graph.get_state(config)
-
-    if not state_snapshot.values:
-        return harness_session_store.to_frontend_state(session_id)
-
-    values = state_snapshot.values
-    pending_clarification = None
-
-    if state_snapshot.tasks:
-        for task in state_snapshot.tasks:
-            if task.interrupts:
-                pending_clarification = task.interrupts[0].value
-                break
-
-    return {
-        "session_id": session_id,
-        "user_id": values.get("user_id", "default_user"),
-        "status": "waiting_clarification" if pending_clarification else values.get("status", "ready"),
-        "requirements": values.get("requirements", {}),
-        "current_plan": values.get("current_plan"),
-        "locked_items": values.get("locked_items", []),
-        "messages": values.get("messages", []),
-        "pending_clarification": pending_clarification,
-        "attempted_actions": values.get("attempted_actions", []),
-        "final_response": values.get("final_response", ""),
-    }
+    return harness_session_store.to_frontend_state(session_id)

@@ -22,7 +22,7 @@
 [![Core Engine](https://img.shields.io/badge/Core%20Engine-Sovereign%20Harness%20v5.0-00F0FF?style=for-the-badge&logo=speedtest&logoColor=black)](backend/app/harness/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%20|%20Vite-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Redis](https://img.shields.io/badge/Redis-Cache%20Layer%201-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
-[![Test Suite](https://img.shields.io/badge/Tests-157%20PASSED%20%7C%20100%25-00FF66?style=for-the-badge&logo=pytest&logoColor=black)](backend/tests/)
+[![Test Suite](https://img.shields.io/badge/Tests-169%20PASSED%20%7C%20100%25-00FF66?style=for-the-badge&logo=pytest&logoColor=black)](backend/tests/)
 [![Thermal Impact](https://img.shields.io/badge/CPU%20Impact-0.1%25%20Idle-7928CA?style=for-the-badge&logo=apple&logoColor=white)](status.sh)
 [![E2E Latency](https://img.shields.io/badge/Latency-0.78s%20E2E-FF0055?style=for-the-badge&logo=speedtest&logoColor=white)](scripts/benchmark_comparison.py)
 
@@ -311,11 +311,11 @@ tripplanner/
 │   │   │   └── cache_decorator.py  # 声明式指纹缓存装饰器
 │   │   ├── memory/                 # SQLite 租户画像、上下文压缩器
 │   │   └── agents/                 # 主动澄清 Agent、自愈修复 Agent、单天文案 Agent
-│   └── tests/                      # 151 项全量自动化测试阵列 (3.07s 极速全绿)
+│   └── tests/                      # 169 项全量自动化测试阵列 (含 12 维极端边界与容错测试，3.69s 极速全绿)
 │
 ├── frontend/                       # 前端 Cyberpunk 视界终端
 │   ├── src/
-│   │   ├── App.vue                 # 交互控制台、流式脉冲终端、动态地图渲染
+│   │   ├── App.vue                 # 交互控制台、流式脉冲终端、动态地图渲染 (Sovereign 独占引擎)
 │   │   └── main.js
 │   └── vite.config.js              # Vite 极速构建编排
 │
@@ -329,11 +329,11 @@ tripplanner/
 ## 🛰️ 演进史诗纪要 (Evolution Odyssey)
 
 ```
-v1.0 (Master Zero)       v2.0 (Deterministic)     v3.0 (Parallel Graph)    v4.0 (Sovereign Matrix)
-──────────────────       ────────────────────     ─────────────────────    ────────────────────────
-ReAct 循环试错           确定性空间算法重构       Send API 动态分日扇出    双重防线 Web RAG 免疫
-每次请求 3+ 次盲目感知   引入高德 API 候选过滤    K-Means++ 拓扑互斥       原生进程内连接池 (3s 全绿)
-时延 20s+ / 易幻觉       时延减半 / 稳定性提升    并行时延 ≈ 单日计算      Redis 亚毫秒指纹缓存矩阵
+v1.0 (Master Zero)   v2.0 (Deterministic)   v3.0 (Parallel Graph)   v4.0 (Sovereign Matrix)   v5.0 (Sovereign Harness)
+──────────────────   ────────────────────   ─────────────────────   ───────────────────────   ────────────────────────
+ReAct 循环试错       确定性空间算法重构     Send API 动态分日扇出   双重防线 Web RAG 免疫     LangGraph 彻底退居废案
+3+ 次盲目环境感知    引入高德 API 候选过滤  K-Means++ 拓扑互斥      原生进程内连接池          Pi-Style 单主循环极速内核
+时延 20s+ / 易幻觉   时延减半 / 稳定性提升  并行时延 ≈ 单日计算     Redis 亚毫秒指纹缓存      ⚡ 0.75s 交付 / 缓存 23.5ms
 ```
 
 ---

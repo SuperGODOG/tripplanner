@@ -41,9 +41,17 @@ def _parse_int(val_str: str) -> int | None:
     if not val_str:
         return None
     val_str = val_str.strip()
+    is_neg = False
+    if val_str.startswith("-"):
+        is_neg = True
+        val_str = val_str[1:].strip()
     if val_str.isdigit():
-        return int(val_str)
-    return CN_NUM_MAP.get(val_str)
+        val = int(val_str)
+        return -val if is_neg else val
+    cn_val = CN_NUM_MAP.get(val_str)
+    if cn_val is not None:
+        return -cn_val if is_neg else cn_val
+    return None
 
 
 def extract_slots_from_input(
@@ -94,7 +102,12 @@ def extract_slots_from_input(
         city_match = re.search(r"(?:去|到|想去|目的地[是为]?)\s*([\u4e00-\u9fa5]{2,6}?(?:市|区)?)", text)
         if city_match:
             candidate = city_match.group(1).replace("市", "").strip()
-            excluded_words = {"旅游", "出游", "玩耍", "度假", "散心", "散散", "散散心", "放松", "透气", "转转", "逛逛", "看看", "走走", "玩", "地方", "哪里"}
+            excluded_words = {
+                "旅游", "出游", "玩耍", "度假", "散心", "散散", "散散心", "放松", "透气",
+                "转转", "逛逛", "看看", "走走", "玩", "地方", "哪里", "火星", "月球",
+                "月亮", "太阳", "外太空", "太空", "银河系", "宇宙", "亚特兰蒂斯",
+                "赛博朋克", "元宇宙", "天堂", "地狱", "地府", "霍格沃茨", "潘多拉", "虚无之地"
+            }
             if len(candidate) in (2, 3, 4) and candidate not in excluded_words:
                 extracted_city = candidate
 
@@ -106,13 +119,14 @@ def extract_slots_from_input(
         if lm not in req.locked_items:
             req.locked_items.append(lm)
 
-    # 2. 天数抽取 (匹配 "玩2天", "3天", "3天左右", 排除形如 "8月24日" 的日历日期)
-    days_match = re.search(r"(?:玩|游玩|行程|呆|待|共|为期)?\s*([0-9一二两三四五六七八九十]+)\s*天(?:左右|上下)?", text)
+    # 2. 天数抽取 (匹配 "玩2天", "3天", "3天左右", 排除形如 "8月24日" 的日历日期，支持 0天 / 负数天拦截)
+    days_match = re.search(r"(?:玩|游玩|行程|呆|待|共|为期)?\s*(-?\s*[0-9一二两三四五六七八九十]+)\s*天(?:左右|上下)?", text)
     if not days_match:
-        days_match = re.search(r"(?<![0-9月])([0-9一二两三四五六七八九十]+)\s*日(?:游|行程)?", text)
+        days_match = re.search(r"(?<![0-9月])(-?\s*[0-9一二两三四五六七八九十]+)\s*日(?:游|行程)?", text)
     if days_match:
-        parsed_days = _parse_int(days_match.group(1))
-        if parsed_days and 1 <= parsed_days <= 14:
+        parsed_days = _parse_int(days_match.group(1).replace(" ", ""))
+        if parsed_days is not None:
+            # 记录天数槽位；若 <=0 将在 check_clarification_needed 中触发天数澄清
             req.set_slot("days", parsed_days, origin=SlotOrigin.USER_EXPLICIT)
 
     # 3. 预算抽取

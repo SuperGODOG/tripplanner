@@ -24,20 +24,9 @@
           </div>
         </div>
         <div class="header-right">
-          <!-- ⚡ 引擎切换器 -->
-          <div class="engine-switch" title="选择核心规划调度引擎">
-            <button
-              :class="['btn-engine', selectedEngine === 'harness' ? 'active' : '']"
-              @click="selectedEngine = 'harness'"
-            >
-              ⚡ Harness 原生引擎 (0.75s 极速)
-            </button>
-            <button
-              :class="['btn-engine', selectedEngine === 'langgraph' ? 'active' : '']"
-              @click="selectedEngine = 'langgraph'"
-            >
-              🌐 LangGraph (Legacy 对照)
-            </button>
+          <!-- ⚡ Sovereign Harness 独占极速引擎 -->
+          <div class="engine-badge" title="独占规划调度引擎：Sovereign Harness">
+            <span class="engine-pill">⚡ Sovereign Harness 极速内核</span>
           </div>
 
           <span class="session-badge" title="当前会话 ID">
@@ -474,7 +463,6 @@ const effectiveRequirements = ref({ slots: {}, locked_items: [], revision_id: 1 
 const currentPlan = ref(null)
 const lockedItems = ref([])
 const attemptedActions = ref([])
-const selectedEngine = ref('harness') // 'harness' | 'langgraph'
 
 const quickPrompts = [
   '我想去北京玩3天，预算5000元',
@@ -598,14 +586,13 @@ async function sendChatRequest(text, actionPayload = null) {
   scrollToBottom()
 
   try {
-    const isHarness = selectedEngine.value === 'harness'
     const endpoint = '/api/session/chat'
     const payload = {
       session_id: sessionId.value,
       input_text: text || '',
       action_type: actionPayload ? 'SET_SLOT' : null,
       action_payload: actionPayload,
-      engine: isHarness ? 'harness' : 'langgraph',
+      engine: 'harness',
     }
 
     const res = await fetch(endpoint, {
@@ -996,34 +983,19 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
 }
-.engine-switch {
+.engine-badge {
   display: flex;
-  background: rgba(15, 23, 42, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 3px;
-  gap: 4px;
+  align-items: center;
 }
-.btn-engine {
-  background: transparent;
-  border: none;
-  color: #94a3b8;
+.engine-pill {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2));
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  color: #c084fc;
   font-size: 11px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.btn-engine:hover {
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.05);
-}
-.btn-engine.active {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.85), rgba(168, 85, 247, 0.85));
-  color: #ffffff;
   font-weight: 600;
-  box-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
+  padding: 4px 10px;
+  border-radius: 9999px;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.15);
 }
 .session-badge {
   font-size: 12px;
