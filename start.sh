@@ -40,11 +40,15 @@ fail()  { echo -e "${RED}❌${NC} $1"; }
 ONLY_BACKEND=false
 NO_OPEN=false
 CHECK_STATUS_ONLY=false
+DEV_MODE=false
 
 for arg in "$@"; do
     case "$arg" in
         --backend|-b)
             ONLY_BACKEND=true
+            ;;
+        --dev|-d)
+            DEV_MODE=true
             ;;
         --no-open)
             NO_OPEN=true
@@ -55,6 +59,7 @@ for arg in "$@"; do
         --help|-h)
             echo "用法: $0 [选项]"
             echo "  --backend, -b   仅启动 Redis 与后端 FastAPI 服务"
+            echo "  --dev, -d       开发模式 (启用热重载，并严格隔离监听目录)"
             echo "  --status, -s    查看当前各组件运行状态"
             echo "  --no-open       启动后不自动打开默认浏览器"
             echo "  --help, -h      显示帮助信息"
@@ -176,13 +181,21 @@ sleep 0.3
 # ══════════════════════════════════════════════
 # 4. 启动后端 FastAPI 引擎 (:8000)
 # ══════════════════════════════════════════════
-info "启动后端 FastAPI 引擎 on :$BACKEND_PORT..."
 cd "$PROJECT_ROOT"
+
+if [ "$DEV_MODE" = true ]; then
+    info "以开发热重载模式启动后端 (严格限定监听 backend/app，排除依赖与日志)..."
+    UVICORN_ARGS="['$PYTHON', '-m', 'uvicorn', 'app.api.main:app', '--host', '0.0.0.0', '--port', '$BACKEND_PORT', '--reload', '--reload-dir', '$BACKEND_DIR/app', '--reload-exclude', '.venv/*', '--reload-exclude', 'data/*', '--reload-exclude', '*.log', '--reload-exclude', 'frontend/*', '--reload-exclude', '*.db*', '--reload-exclude', '*.pid']"
+else
+    info "以低功耗静音模式启动后端 (禁用热重载，0 文件监听，杜绝 CPU 空转与发热)..."
+    UVICORN_ARGS="['$PYTHON', '-m', 'uvicorn', 'app.api.main:app', '--host', '0.0.0.0', '--port', '$BACKEND_PORT', '--workers', '1', '--loop', 'asyncio']"
+fi
 
 BACKEND_PID=$("$PYTHON" -c "
 import os, subprocess
+cmd = $UVICORN_ARGS
 p = subprocess.Popen(
-    ['$PYTHON', '-m', 'uvicorn', 'app.api.main:app', '--host', '0.0.0.0', '--port', '$BACKEND_PORT', '--reload'],
+    cmd,
     cwd='$PROJECT_ROOT',
     env=dict(os.environ, PYTHONPATH='$BACKEND_DIR'),
     stdin=subprocess.DEVNULL,

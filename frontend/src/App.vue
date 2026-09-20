@@ -700,9 +700,7 @@ async function sendChatRequest(text, actionPayload = null) {
             lockedItems.value = parsed.locked_items
           }
           saveSessionCache()
-          if (!isHarness) {
-            fetchSessionState()
-          }
+          fetchSessionState()
         } else if (eventName === 'done') {
           assistantMsg.isStreaming = false
           assistantMsg.isThinkingOpen = false
@@ -799,15 +797,18 @@ function clearSessionCache() {
 // ── 查询三轨状态快照与断点同步 ──
 async function fetchSessionState() {
   try {
-    const res = await fetch(`/api/session/${sessionId.value}/state`)
+    const isHarness = selectedEngine.value === 'harness'
+    const endpoint = isHarness ? `/api/harness/session/${sessionId.value}/state` : `/api/session/${sessionId.value}/state`
+    const res = await fetch(endpoint)
     if (!res.ok) return
     const data = await res.json()
     if (data.status === 'new') {
       return
     }
 
-    if (data.requirements && Object.keys(data.requirements).length) {
-      effectiveRequirements.value = data.requirements
+    const reqs = data.effective_requirements || data.requirements
+    if (reqs && Object.keys(reqs).length) {
+      effectiveRequirements.value = reqs
     }
     if (data.current_plan) {
       currentPlan.value = data.current_plan

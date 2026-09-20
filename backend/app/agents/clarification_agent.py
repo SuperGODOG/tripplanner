@@ -94,7 +94,7 @@ def extract_slots_from_input(
         city_match = re.search(r"(?:去|到|想去|目的地[是为]?)\s*([\u4e00-\u9fa5]{2,6}?(?:市|区)?)", text)
         if city_match:
             candidate = city_match.group(1).replace("市", "").strip()
-            excluded_words = {"旅游", "出游", "玩耍", "度假", "散心", "转转", "逛逛", "看看", "玩", "地方", "哪里"}
+            excluded_words = {"旅游", "出游", "玩耍", "度假", "散心", "散散", "散散心", "放松", "透气", "转转", "逛逛", "看看", "走走", "玩", "地方", "哪里"}
             if len(candidate) in (2, 3, 4) and candidate not in excluded_words:
                 extracted_city = candidate
 

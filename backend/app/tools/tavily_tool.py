@@ -123,13 +123,13 @@ def _llm_extract_guide_tips(city: str, poi_name: str, text: str) -> tuple[str, l
             f"1. 坚决剔除网页导航、广告、页脚（如企业文化/广告服务/关于我们/意见建议等）、SEO 关键词堆叠与空话套话；\n"
             f"2. booking_policy：用一至两句话总结真实的门票价格、实名预约渠道（公众号/小程序/官网）与提前放票时间；\n"
             f"3. tips：输出 1 到 3 条真正有实用价值的避坑指南、游玩动线、错峰攻略或拍照机位提示；\n"
-            f"4. 严格输出合法 JSON 字典（不要输出 markdown 代码块 ```json，不要输出其他文字解释）：\n"
+            f"4. 严格直接输出合法 JSON 字典，严禁任何思考推理过程，严禁 markdown 代码块：\n"
             f'{{"booking_policy": "...", "tips": ["...", "..."]}}\n\n'
             f"【检索片段】\n"
             f"{trimmed_text}"
         )
 
-        resp = llm.invoke([{"role": "user", "content": prompt}])
+        resp = llm.invoke([{"role": "user", "content": prompt}], max_tokens=350)
         content = resp.content if hasattr(resp, "content") else str(resp)
         content = content.strip()
 
@@ -197,13 +197,26 @@ def _fetch_tavily_search_impl(
         combined_text = "\n".join([r.get("content", "") for r in results])
         urls = [r.get("url", "") for r in results if r.get("url")]
 
-        # 优先使用 LLM 语义结构化提炼；若失败则透明降级到降噪启发式提炼
-        llm_res = _llm_extract_guide_tips(clean_city, clean_poi, combined_text)
-        if llm_res:
-            booking_policy, tips = llm_res
+        # 优先执行高性能本地启发式降噪提取 (0.01ms)，杜绝大模型长考能耗与网络延迟
+        h_policy = _heuristic_extract_booking_policy(combined_text)
+        h_tips = _heuristic_extract_tips(combined_text)
+
+        # 启发式提取出真实门票信息与有效避坑时，直接采用
+        is_heuristic_sufficient = (
+            h_policy and "请以景区" not in h_policy and
+            h_tips and len(h_tips) >= 1 and "建议错峰出行" not in h_tips[0]
+        )
+
+        if is_heuristic_sufficient:
+            booking_policy, tips = h_policy, h_tips
         else:
-            booking_policy = _heuristic_extract_booking_policy(combined_text)
-            tips = _heuristic_extract_tips(combined_text)
+            # 仅在无具体事实时才尝试轻量 LLM 辅助提炼
+            llm_res = _llm_extract_guide_tips(clean_city, clean_poi, combined_text)
+            if llm_res and llm_res[0]:
+                booking_policy, tips = llm_res
+            else:
+                booking_policy = h_policy
+                tips = h_tips
 
         # 挑选首条最相关摘要并做降噪处理
         first_content = results[0].get("content", "")

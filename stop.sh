@@ -93,7 +93,8 @@ _kill_by_port_and_pidfile $BACKEND_PORT "后端 FastAPI" "$PROJECT_ROOT/.backend
 _kill_by_port_and_pidfile $FRONTEND_PORT "前端 Vite" "$PROJECT_ROOT/.frontend.pid"
 
 # 3. 清理残余孤儿子进程与僵尸任务 (防 CPU 耗电与发热)
-info "正在清理可能残留的开发构建与 MCP 子进程..."
+info "正在清理可能残留的开发构建、uvicorn 孤儿子进程与 MCP 子进程..."
+pkill -f "uvicorn.*app.api.main:app" 2>/dev/null && ok "已清理残留的 uvicorn 进程" || true
 pkill -f "vite.*dev" 2>/dev/null && ok "已清理残留的 vite 构建进程" || true
 pkill -f "uvx amap-mcp-server" 2>/dev/null && ok "已清理残留的 amap-mcp-server 解释器" || true
 pkill -f "esbuild.*service" 2>/dev/null && ok "已清理残留的 esbuild 编译服务" || true

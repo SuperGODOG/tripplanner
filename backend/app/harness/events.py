@@ -68,6 +68,20 @@ class InvariantViolationEvent(HarnessEvent):
 
 
 @dataclass
+class ClarificationEvent(HarnessEvent):
+    """未决槽位主动交互澄清事件（前端渲染选择卡片）"""
+    def __init__(self, prompt_text: str, options: list[dict[str, Any]], slot_key: str = ""):
+        super().__init__(
+            event_type="clarification",
+            payload={
+                "prompt_text": prompt_text,
+                "options": options,
+                "slot_key": slot_key,
+            }
+        )
+
+
+@dataclass
 class PlanVersionEvent(HarnessEvent):
     """生成或更新完整行程版本事件"""
     def __init__(self, plan: dict[str, Any]):

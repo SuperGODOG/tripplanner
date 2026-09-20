@@ -20,6 +20,7 @@ from .events import (
     ThinkingEvent,
     ToolStartEvent,
     ToolEndEvent,
+    ClarificationEvent,
     InvariantViolationEvent,
     PlanVersionEvent,
     MessageDeltaEvent,
@@ -27,8 +28,9 @@ from .events import (
 )
 from .invariants import TravelInvariants
 from .registry import ToolRegistry, travel_tools
+from .session_store import harness_session_store
 from ..agents.clarification_agent import extract_slots_from_input
-from ..models.session import EffectiveRequirements
+from ..models.session import EffectiveRequirements, SlotOrigin
 from ..services.poi_synthesizer import synthesize_city_pois
 
 logger = logging.getLogger(__name__)
@@ -46,14 +48,80 @@ class TravelAgentHarness:
         session_id: str,
         user_input: str,
         current_requirements: EffectiveRequirements | None = None,
+        action_type: str | None = None,
+        action_payload: dict[str, Any] | None = None,
     ) -> AsyncGenerator[HarnessEvent, None]:
         """运行单轮 Harness 主循环 (产出强类型异步事件流)"""
         yield ThinkingEvent(step="init", detail=f"Harness 已接入会话 [{session_id}]，解析用户意图...")
 
+        # 若未直接传入 requirements，则从本地会话存储中恢复已有状态
+        if current_requirements is None:
+            saved_snap = harness_session_store.get(session_id)
+            if saved_snap.effective_requirements and "slots" in saved_snap.effective_requirements:
+                try:
+                    current_requirements = EffectiveRequirements(**saved_snap.effective_requirements)
+                except Exception:
+                    pass
+
         # 1. 意图与槽位解析 (严格解耦景点偏好与美食偏好)
         req = extract_slots_from_input(user_input, current_requirements)
-        city = req.get_slot_value("city") or "北京"
-        days = int(req.get_slot_value("days") or 3)
+
+        # 处理前端交互操作 (如点击澄清选项卡回传 SET_SLOT)
+        if action_type == "SET_SLOT" and action_payload and isinstance(action_payload, dict):
+            k = action_payload.get("key")
+            v = action_payload.get("value")
+            if k and v is not None:
+                req.set_slot(k, v, origin=SlotOrigin.USER_EXPLICIT)
+            if "days" in action_payload and k != "days":
+                req.set_slot("days", action_payload["days"], origin=SlotOrigin.USER_EXPLICIT)
+
+        city = req.get_slot_value("city")
+        days = req.get_slot_value("days")
+
+        # ── 主动澄清拦截：核心槽位缺失时不盲目粗暴规划 ──
+        if not city and not days:
+            clar_event = ClarificationEvent(
+                prompt_text="请问您计划前往哪座城市？打算玩几天？",
+                options=[
+                    {"option_id": "opt_bj", "label": "北京 3天 (古都中轴与名胜)", "payload": {"key": "city", "value": "北京", "days": 3}},
+                    {"option_id": "opt_cd", "label": "成都 3天 (天府文化与美食)", "payload": {"key": "city", "value": "成都", "days": 3}},
+                    {"option_id": "opt_xa", "label": "西安 2天 (秦汉唐历史古韵)", "payload": {"key": "city", "value": "西安", "days": 2}},
+                    {"option_id": "opt_sh", "label": "上海 2天 (魔都外滩经典行)", "payload": {"key": "city", "value": "上海", "days": 2}},
+                ],
+                slot_key="city",
+            )
+            yield clar_event
+            harness_session_store.update(
+                session_id=session_id,
+                requirements=req,
+                pending_clarification=clar_event.payload,
+                new_user_message=user_input,
+            )
+            yield TurnCompleteEvent(session_id=session_id, success=True)
+            return
+
+        if not days:
+            clar_event = ClarificationEvent(
+                prompt_text=f"已确认目的地【{city}】，请问您计划游玩几天？",
+                options=[
+                    {"option_id": "opt_d2", "label": "2天 (周末快闪 / 经典打卡)", "payload": {"key": "days", "value": 2}},
+                    {"option_id": "opt_d3", "label": "3天 (适度漫游 / 深度体验)", "payload": {"key": "days", "value": 3}},
+                    {"option_id": "opt_d5", "label": "5天 (全景探索 / 周边全包)", "payload": {"key": "days", "value": 5}},
+                ],
+                slot_key="days",
+            )
+            yield clar_event
+            harness_session_store.update(
+                session_id=session_id,
+                requirements=req,
+                pending_clarification=clar_event.payload,
+                new_user_message=user_input,
+            )
+            yield TurnCompleteEvent(session_id=session_id, success=True)
+            return
+
+        city = str(city)
+        days = int(days)
         budget_total = req.get_slot_value("budget_total")
         locked_items = list(req.locked_items or [])
 
@@ -249,7 +317,16 @@ class TravelAgentHarness:
                     summary_md += f"   - 🎫 *门票/预约*: {gt['booking_policy']}\n"
                 if gt.get("tips"):
                     summary_md += f"   - 💡 *避坑贴士*: {gt['tips'][0]}\n"
-            summary_md += f"\n🏨 推荐住宿：**{d.get('hotel', {}).get('name', '精选商圈酒店')}**\n\n"
+        # ── Step 6: 状态原子持久化与流式广播 ──
+        harness_session_store.update(
+            session_id=session_id,
+            requirements=req,
+            current_plan=final_plan,
+            locked_items=locked_items,
+            new_user_message=user_input,
+            new_assistant_message=summary_md,
+            pending_clarification=None,
+        )
 
         yield MessageDeltaEvent(delta=summary_md)
         yield TurnCompleteEvent(session_id=session_id, success=True)

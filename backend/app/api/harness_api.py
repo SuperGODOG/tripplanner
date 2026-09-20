@@ -30,6 +30,8 @@ class HarnessChatRequest(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid4()), description="会话唯一标识")
     user_id: str = Field(default="default_user", description="用户标识")
     input_text: str = Field(default="", description="自然语言旅行规划输入")
+    action_type: str | None = Field(default=None, description="操作类型 (如 SET_SLOT / RESUME)")
+    action_payload: dict[str, Any] | None = Field(default=None, description="操作载荷 (如选项卡点击)")
     requirements: dict[str, Any] | None = Field(default=None, description="已有生效需求（可选）")
 
 
@@ -45,6 +47,7 @@ async def harness_stream_chat(request: HarnessChatRequest):
 
     直接产出强类型事件流：
     - event: thinking (思考推进与槽位提取)
+    - event: clarification (主动交互澄清卡片)
     - event: tool_start (算法与名胜检索开始)
     - event: tool_end (算法执行完毕与耗时统计)
     - event: invariant_violation (领域不变式审计预警)
@@ -67,6 +70,8 @@ async def harness_stream_chat(request: HarnessChatRequest):
                 session_id=request.session_id,
                 user_input=request.input_text,
                 current_requirements=req_obj,
+                action_type=request.action_type,
+                action_payload=request.action_payload,
             ):
                 yield _format_sse_event(event.event_type, event.to_sse_dict())
         except Exception as e:
@@ -82,6 +87,13 @@ async def harness_stream_chat(request: HarnessChatRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/session/{session_id}/state")
+async def get_harness_session_state(session_id: str):
+    """查询指定 Harness 会话的状态快照 (100% 契合前端 fetchSessionState)"""
+    from ..harness.session_store import harness_session_store
+    return harness_session_store.to_frontend_state(session_id)
 
 
 @router.get("/tools")
