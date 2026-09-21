@@ -39,6 +39,12 @@
             </select>
           </div>
 
+          <!-- 💖 旅行体温画像抽屉入口 -->
+          <button class="btn-lifestyle" @click="isLifestyleDrawerOpen = true" title="查看并配置个性化旅行体温画像">
+            <span>💖 旅行体温</span>
+            <span class="lifestyle-badge">{{ paceLabel(userLifestyle.travel_pace) }}</span>
+          </button>
+
           <!-- 👣 我的足迹抽屉入口 -->
           <button class="btn-footprints" @click="isFootprintDrawerOpen = true" title="查看并管理我的历史游览足迹">
             <span>👣 我的足迹</span>
@@ -291,6 +297,31 @@
               </div>
             </Transition>
 
+            <!-- 💖 Pi 伴随式体温关怀卡片 -->
+            <div v-if="currentPlan && currentPlan.lifestyle_care" class="lifestyle-care-card">
+              <div class="care-header">
+                <div class="care-title">
+                  <span class="care-icon">🌡️</span>
+                  <span>Pi 伴随式体温关怀</span>
+                </div>
+                <span class="care-pill">生理耐受度与生物钟自适应</span>
+              </div>
+              <div class="care-body">
+                <p class="care-text">{{ currentPlan.lifestyle_care }}</p>
+                <div v-if="currentPlan.lifestyle_profile" class="care-tags">
+                  <span class="care-tag">
+                    🏃 每日步数舒适圈: {{ currentPlan.lifestyle_profile.daily_walking_limit_km || 8 }}km
+                  </span>
+                  <span class="care-tag">
+                    ⏰ 首站出发作息: {{ currentPlan.lifestyle_profile.morning_person ? '08:30 晨光早游' : '10:30 自然醒慢行' }}
+                  </span>
+                  <span class="care-tag">
+                    👥 同行角色: {{ companionLabel(currentPlan.lifestyle_profile.companion_type) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <!-- 4. 行程分日详情列表 -->
             <div v-if="currentPlan && currentPlan.days && currentPlan.days.length" class="itinerary-days">
               <div
@@ -305,6 +336,9 @@
                     门票 ¥{{ day.total_ticket || 0 }} · 游览 {{ (day.attractions || []).length }} 景点
                     <span v-if="day.telemetry && day.telemetry.saved_km > 0" class="day-saved-tag">
                       ⚡ 节省 {{ day.telemetry.saved_km }}km
+                    </span>
+                    <span v-if="day.telemetry && day.telemetry.total_distance_km" class="day-walking-tag" :class="{ 'warning': day.telemetry.is_walking_exceeded }">
+                      🚶 徒步 {{ day.telemetry.total_distance_km }}km (限 {{ day.telemetry.walking_limit_km }}km)
                     </span>
                   </div>
                 </div>
@@ -321,6 +355,12 @@
                   <div v-if="day.weather.tip" class="weather-tip">
                     💡 {{ day.weather.tip }}
                   </div>
+                </div>
+
+                <!-- 步数舒适度与体温关怀提示 -->
+                <div v-if="day.telemetry && day.telemetry.pacing_hint" class="day-pacing-strip" :class="{ 'warning': day.telemetry.is_walking_exceeded }">
+                  <span class="pacing-icon">{{ day.telemetry.is_walking_exceeded ? '⚠️' : '👟' }}</span>
+                  <span class="pacing-text">{{ day.telemetry.pacing_hint }}</span>
                 </div>
 
                 <!-- 景点列表 (2-Opt 最优时序) -->
@@ -781,6 +821,149 @@
           </div>
         </div>
       </Transition>
+
+      <!-- ════════ 旅行体温画像与伴随关怀抽屉 (Lifestyle Drawer) ════════ -->
+      <Transition name="fade">
+        <div v-if="isLifestyleDrawerOpen" class="drawer-overlay" @click.self="isLifestyleDrawerOpen = false">
+          <div class="lifestyle-drawer glass-panel">
+            <div class="drawer-header">
+              <div class="drawer-title">
+                <span class="drawer-icon">💖</span>
+                <span>旅行体温画像与伴随关怀</span>
+                <span class="lifestyle-drawer-badge">{{ paceLabel(userLifestyle.travel_pace) }}</span>
+              </div>
+              <button class="btn-close-drawer" @click="isLifestyleDrawerOpen = false" title="关闭">✕</button>
+            </div>
+
+            <div class="lifestyle-drawer-sub">
+              🌡️ <strong>生理节律与耐受度白盒化</strong>：Harness 依据该画像自适应调整每日首站时间、计算徒步距离上限并进行关怀提示。
+            </div>
+
+            <div class="drawer-body">
+              <!-- 1. 旅行节奏 -->
+              <div class="form-group">
+                <label class="form-label">🏃 旅行节奏偏好：</label>
+                <div class="pace-options">
+                  <div
+                    class="pace-card"
+                    :class="{ active: userLifestyle.travel_pace === 'relaxed' }"
+                    @click="userLifestyle.travel_pace = 'relaxed'"
+                  >
+                    <div class="card-title">🐢 松弛慢调</div>
+                    <div class="card-desc">每日少景点、留足茶歇放空</div>
+                  </div>
+                  <div
+                    class="pace-card"
+                    :class="{ active: userLifestyle.travel_pace === 'balanced' }"
+                    @click="userLifestyle.travel_pace = 'balanced'"
+                  >
+                    <div class="card-title">⚖️ 均衡深度</div>
+                    <div class="card-desc">兼顾打卡与体验、张弛有度</div>
+                  </div>
+                  <div
+                    class="pace-card"
+                    :class="{ active: userLifestyle.travel_pace === 'intense' }"
+                    @click="userLifestyle.travel_pace = 'intense'"
+                  >
+                    <div class="card-title">⚡ 特种兵充沛</div>
+                    <div class="card-desc">早出晚归、密集探索拉满</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. 作息与生物钟 -->
+              <div class="form-group">
+                <label class="form-label">⏰ 作息习惯与首站出发：</label>
+                <div class="morning-options">
+                  <div
+                    class="morning-card"
+                    :class="{ active: !userLifestyle.morning_person }"
+                    @click="userLifestyle.morning_person = false"
+                  >
+                    <div class="card-title">☀️ 松弛晚起 (10:30 出发)</div>
+                    <div class="card-desc">睡到自然醒，从容午前后出发</div>
+                  </div>
+                  <div
+                    class="morning-card"
+                    :class="{ active: userLifestyle.morning_person }"
+                    @click="userLifestyle.morning_person = true"
+                  >
+                    <div class="card-title">🌅 晨起早游 (08:30 出发)</div>
+                    <div class="card-desc">早鸟早市，清晨避开人流高峰</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. 每日步行耐受度上限 -->
+              <div class="form-group">
+                <div class="slider-header">
+                  <label class="form-label">🚶 每日步行耐受红线：</label>
+                  <span class="slider-val">{{ userLifestyle.daily_walking_limit_km }} km / 天</span>
+                </div>
+                <input
+                  type="range"
+                  min="4.0"
+                  max="18.0"
+                  step="0.5"
+                  v-model.number="userLifestyle.daily_walking_limit_km"
+                  class="km-slider"
+                />
+                <div class="slider-hint">
+                  <span v-if="userLifestyle.daily_walking_limit_km <= 6.5">🍃 轻度舒适：适合老幼同行、推车漫步或休养型旅游</span>
+                  <span v-else-if="userLifestyle.daily_walking_limit_km <= 10.5">👟 标准健康：适合常规自由行与城市探店</span>
+                  <span v-else>🧗 特训健步：高强度体力耐受，能走能逛不觉累</span>
+                </div>
+              </div>
+
+              <!-- 4. 同行伙伴特征 -->
+              <div class="form-group">
+                <label class="form-label">👥 出行伙伴画像：</label>
+                <div class="companion-chips">
+                  <button
+                    v-for="item in companionList"
+                    :key="item.key"
+                    class="btn-companion-chip"
+                    :class="{ active: userLifestyle.companion_type === item.key }"
+                    @click="userLifestyle.companion_type = item.key"
+                  >
+                    <span>{{ item.icon }} {{ item.label }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 5. 关怀细分标签 -->
+              <div class="form-group">
+                <label class="form-label">🏷️ 专项关怀偏好：</label>
+                <div class="care-chips">
+                  <button
+                    v-for="tag in availableCareTags"
+                    :key="tag.key"
+                    class="btn-care-chip"
+                    :class="{ active: userLifestyle.special_needs?.includes(tag.key) }"
+                    @click="toggleSpecialNeed(tag.key)"
+                  >
+                    {{ tag.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 抽屉底部保存操作栏 -->
+            <div class="drawer-footer">
+              <div class="invalidation-notice">
+                ⚡ <strong>定向缓存失效</strong>：保存后将自动清除该租户私有缓存，下轮规划将按新时序与体能线重算。
+              </div>
+              <button
+                class="btn-save-lifestyle"
+                :disabled="isSavingLifestyle"
+                @click="saveUserLifestyle"
+              >
+                {{ isSavingLifestyle ? '正在同步画像...' : '💾 保存体温画像并同步记忆' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
@@ -793,6 +976,122 @@ const userId = ref(localStorage.getItem('tp_user_id') || 'demo_traveler')
 const sessionId = ref(localStorage.getItem('tp_session_id') || ('sess_' + Math.random().toString(36).slice(2, 10)))
 localStorage.setItem('tp_session_id', sessionId.value)
 localStorage.setItem('tp_user_id', userId.value)
+
+// ── 生活方式体温画像状态 (Lifestyle & Wellness) ──
+const isLifestyleDrawerOpen = ref(false)
+const isSavingLifestyle = ref(false)
+const userLifestyle = ref({
+  user_id: userId.value,
+  travel_pace: 'balanced',
+  morning_person: false,
+  daily_walking_limit_km: 8.0,
+  companion_type: 'couple',
+  special_needs: [],
+  aesthetic_taste: [],
+})
+
+const companionList = [
+  { key: 'solo', icon: '🎒', label: '独行自由' },
+  { key: 'couple', icon: '🥂', label: '情侣伴侣' },
+  { key: 'family_with_kids', icon: '🧸', label: '亲子家庭' },
+  { key: 'elderly', icon: '👵', label: '长辈同行' },
+  { key: 'pet_lover', icon: '🐾', label: '携宠漫步' },
+]
+
+const availableCareTags = [
+  { key: 'tea_breaks', label: '☕ 午后茶歇' },
+  { key: 'avoid_crowds', label: '🧘 避开拥挤' },
+  { key: 'stroller_friendly', label: '👶 推车友好' },
+  { key: 'barrier_free', label: '♿ 无障碍通道' },
+  { key: 'night_market', label: '🍢 市井烟火' },
+  { key: 'historic_streets', label: '🏛️ 老街慢步' },
+]
+
+function paceLabel(pace) {
+  const map = {
+    relaxed: '松弛慢调',
+    balanced: '均衡深度',
+    intense: '特种兵充沛',
+  }
+  return map[pace] || '均衡深度'
+}
+
+function companionLabel(comp) {
+  const map = {
+    solo: '独行自由',
+    couple: '情侣伴侣',
+    family_with_kids: '亲子家庭',
+    elderly: '长辈同行',
+    pet_lover: '携宠漫步',
+  }
+  return map[comp] || '自由同游'
+}
+
+function toggleSpecialNeed(tag) {
+  if (!userLifestyle.value.special_needs) {
+    userLifestyle.value.special_needs = []
+  }
+  const list = userLifestyle.value.special_needs
+  const idx = list.indexOf(tag)
+  if (idx >= 0) {
+    list.splice(idx, 1)
+  } else {
+    list.push(tag)
+  }
+}
+
+async function loadUserLifestyle() {
+  try {
+    const res = await fetch(`/api/user/${userId.value}/lifestyle`)
+    if (res.ok) {
+      const data = await res.json()
+      userLifestyle.value = {
+        ...userLifestyle.value,
+        ...data,
+        morning_person: Boolean(data.morning_person),
+        daily_walking_limit_km: Number(data.daily_walking_limit_km || 8.0),
+        special_needs: Array.isArray(data.special_needs) ? data.special_needs : [],
+        aesthetic_taste: Array.isArray(data.aesthetic_taste) ? data.aesthetic_taste : [],
+      }
+    }
+  } catch (e) {
+    console.error('加载生活方式画像失败', e)
+  }
+}
+
+async function saveUserLifestyle() {
+  isSavingLifestyle.value = true
+  try {
+    const payload = {
+      travel_pace: userLifestyle.value.travel_pace,
+      morning_person: Boolean(userLifestyle.value.morning_person),
+      daily_walking_limit_km: Number(userLifestyle.value.daily_walking_limit_km),
+      companion_type: userLifestyle.value.companion_type,
+      special_needs: userLifestyle.value.special_needs,
+      aesthetic_taste: userLifestyle.value.aesthetic_taste,
+    }
+    const res = await fetch(`/api/user/${userId.value}/lifestyle`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.lifestyle) {
+        userLifestyle.value = {
+          ...userLifestyle.value,
+          ...data.lifestyle,
+          morning_person: Boolean(data.lifestyle.morning_person),
+        }
+      }
+      isLifestyleDrawerOpen.value = false
+    }
+  } catch (e) {
+    console.error('保存生活方式画像失败', e)
+  } finally {
+    isSavingLifestyle.value = false
+  }
+}
 
 // ── 足迹管理状态 ──
 const userFootprints = ref([])
@@ -906,6 +1205,7 @@ function onUserChange() {
   localStorage.setItem('tp_user_id', userId.value)
   resetSession()
   loadUserFootprints()
+  loadUserLifestyle()
 }
 
 const mouseX = ref(0)
@@ -1592,8 +1892,8 @@ onMounted(async () => {
   loadSessionCache()
   scrollToBottom()
 
-  // 2. 加载租户历史足迹
-  await loadUserFootprints()
+  // 2. 加载租户历史足迹与生活方式体温画像
+  await Promise.all([loadUserFootprints(), loadUserLifestyle()])
 
   // 3. 异步服务端状态同步与断点核验
   await fetchSessionState()
@@ -2536,6 +2836,117 @@ onMounted(async () => {
   border-radius: 4px;
   font-weight: 600;
 }
+.day-walking-tag {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.day-walking-tag.warning {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.day-pacing-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #bae6fd;
+}
+.day-pacing-strip.warning {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+.pacing-icon {
+  font-size: 14px;
+}
+.pacing-text {
+  line-height: 1.4;
+}
+
+/* ── 💖 Pi 伴随式体温关怀卡片 ── */
+.lifestyle-care-card {
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.12) 0%, rgba(139, 92, 246, 0.08) 100%);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  border-radius: 12px;
+  padding: 14px 18px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  position: relative;
+  overflow: hidden;
+}
+.lifestyle-care-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: linear-gradient(180deg, #f43f5e, #ec4899);
+}
+.care-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.care-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fda4af;
+}
+.care-icon {
+  font-size: 16px;
+}
+.care-pill {
+  font-size: 10px;
+  color: #f472b6;
+  background: rgba(244, 63, 94, 0.15);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+.care-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.care-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #fce7f3;
+  margin: 0;
+}
+.care-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.care-tag {
+  font-size: 11px;
+  color: #e0e7ff;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
 .time-tag {
   color: #38bdf8 !important;
   font-weight: 600;
@@ -2762,6 +3173,35 @@ onMounted(async () => {
 .tenant-select option {
   background: #0f172a;
   color: #f1f5f9;
+}
+
+/* ── 旅行体温画像顶部按钮 ── */
+.btn-lifestyle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  color: #fda4af;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-lifestyle:hover {
+  background: rgba(244, 63, 94, 0.25);
+  color: #ffe4e6;
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.3);
+}
+.lifestyle-badge {
+  background: rgba(244, 63, 94, 0.85);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 1px 6px;
 }
 
 /* ── 我的足迹顶部按钮 ── */
@@ -3034,6 +3474,230 @@ onMounted(async () => {
   background: #34d399;
 }
 .btn-add-footprint:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 旅行体温画像与伴随关怀抽屉 (Lifestyle Drawer) ── */
+.lifestyle-drawer {
+  width: 480px;
+  max-width: 92vw;
+  height: 100vh;
+  border-radius: 0;
+  border-left: 1px solid rgba(244, 63, 94, 0.25);
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: -10px 0 35px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+}
+.lifestyle-drawer-badge {
+  background: rgba(244, 63, 94, 0.2);
+  color: #fda4af;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(244, 63, 94, 0.4);
+}
+.lifestyle-drawer-sub {
+  padding: 10px 20px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #cbd5e1;
+  background: rgba(244, 63, 94, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.lifestyle-drawer-sub strong {
+  color: #fda4af;
+}
+
+/* 抽屉内部表单组件 */
+.lifestyle-drawer .drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.form-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.pace-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.pace-card {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  padding: 10px 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+.pace-card:hover {
+  border-color: rgba(244, 63, 94, 0.4);
+  background: rgba(30, 41, 59, 0.8);
+}
+.pace-card.active {
+  border-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.18);
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.25);
+}
+.pace-card .card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-bottom: 4px;
+}
+.pace-card .card-desc {
+  font-size: 10px;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
+.morning-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.morning-card {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.morning-card:hover {
+  border-color: rgba(244, 63, 94, 0.4);
+  background: rgba(30, 41, 59, 0.8);
+}
+.morning-card.active {
+  border-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.18);
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.25);
+}
+.morning-card .card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-bottom: 4px;
+}
+.morning-card .card-desc {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.slider-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fda4af;
+  font-family: monospace;
+}
+.km-slider {
+  width: 100%;
+  accent-color: #f43f5e;
+  cursor: pointer;
+  margin: 4px 0;
+}
+.slider-hint {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.companion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn-companion-chip {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  padding: 6px 12px;
+  color: #cbd5e1;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-companion-chip:hover {
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #f8fafc;
+}
+.btn-companion-chip.active {
+  background: rgba(244, 63, 94, 0.2);
+  border-color: #f43f5e;
+  color: #fda4af;
+  font-weight: 600;
+}
+
+.care-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn-care-chip {
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: #94a3b8;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-care-chip:hover {
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #e2e8f0;
+}
+.btn-care-chip.active {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: #f43f5e;
+  border-style: solid;
+  color: #fda4af;
+  font-weight: 600;
+}
+
+.invalidation-notice {
+  font-size: 11px;
+  line-height: 1.4;
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+.invalidation-notice strong {
+  color: #f59e0b;
+}
+.btn-save-lifestyle {
+  width: 100%;
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+  border: none;
+  border-radius: 8px;
+  padding: 10px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-save-lifestyle:hover:not(:disabled) {
+  opacity: 0.95;
+  box-shadow: 0 0 14px rgba(244, 63, 94, 0.4);
+}
+.btn-save-lifestyle:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

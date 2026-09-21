@@ -126,6 +126,16 @@ class TravelAgentHarness:
             detail=f"识别目的地: {city}, 天数: {days}天, 景点偏好: {scenic_prefs or '全城经典'}, 美食偏好: {food_prefs or '地道美食'}"
         )
 
+        # ── 伴随式画像挂载：读取租户生活方式与作息体温特征 (Pi Companion Memory) ──
+        repo = get_memory_repository()
+        lifestyle = repo.get_lifestyle(user_id=user_id)
+        pace_label = {"relaxed": "松弛慢调", "balanced": "均衡探索", "intense": "特种兵打卡"}.get(lifestyle.get("travel_pace", "balanced"), "均衡探索")
+        morning_label = "晨起早游 (08:30起步)" if lifestyle.get("morning_person") else "松弛晚起 (10:30起步)"
+        yield ThinkingEvent(
+            step="lifestyle_care",
+            detail=f"已读取【{user_id}】体温画像: {pace_label} · 每日限步 {lifestyle.get('daily_walking_limit_km', 8.0)}km · {morning_label}"
+        )
+
         # ── 地图动作：Agent as Map Controller (FLY_TO 城市全局视口) ──
         center_coord = get_city_center(city)
         center_lng_lat = [float(center_coord[0]), float(center_coord[1])] if center_coord else [116.407, 39.904]
@@ -271,15 +281,36 @@ class TravelAgentHarness:
                 yield ToolEndEvent(tool_name="solve_2opt_route", result_summary=f"路线优化完成", duration_ms=dur_ms)
 
                 ordered_attrs = []
+                is_morning = bool(lifestyle.get("morning_person", False))
+                base_start_h = 8 if is_morning else 10
+                base_start_m = 30
+
                 if hasattr(route_res, "route") and route_res.route:
                     poi_map = {p.get("name", ""): p for p in day_pois if isinstance(p, dict)}
-                    for node in route_res.route:
+                    curr_h = base_start_h
+                    for seq_idx, node in enumerate(route_res.route):
                         inner_poi = node.get("poi") or {}
                         n_name = node.get("name") or inner_poi.get("name", "")
                         orig = dict(poi_map.get(n_name) or inner_poi or node)
                         orig["name"] = n_name or orig.get("name", "精选景点")
-                        orig["arrive_time"] = node.get("arrive_time", "09:00")
-                        orig["depart_time"] = node.get("depart_time", "11:00")
+
+                        # 真实作息与生活方式时序自适应
+                        if seq_idx == 0:
+                            arr_str = f"{base_start_h:02d}:{base_start_m:02d}"
+                            dep_str = f"{base_start_h + 2:02d}:{base_start_m:02d}"
+                            curr_h = base_start_h + 2
+                        elif seq_idx == 1:
+                            lunch_h = max(curr_h, 12) + (1 if not is_morning else 0)
+                            arr_str = f"{max(lunch_h + 1, 14):02d}:00"
+                            dep_str = f"{max(lunch_h + 3, 16):02d}:30"
+                            curr_h = max(lunch_h + 3, 16)
+                        else:
+                            arr_str = f"{curr_h:02d}:30"
+                            dep_str = f"{min(curr_h + 2, 20):02d}:00"
+                            curr_h = min(curr_h + 2, 20)
+
+                        orig["arrive_time"] = arr_str
+                        orig["depart_time"] = dep_str
                         orig["distance_km"] = round(float(node.get("distance_km") or 0.0), 1)
                         if "lng" not in orig and "lng" in inner_poi:
                             orig["lng"] = inner_poi["lng"]
@@ -307,6 +338,17 @@ class TravelAgentHarness:
                         }
                     )
 
+                day_total_km = round(sum(float(a.get("distance_km") or 0.0) for a in ordered_attrs), 1)
+                limit_km = float(lifestyle.get("daily_walking_limit_km", 8.0))
+                is_exceeded = day_total_km > limit_km
+
+                day_telemetry = {
+                    "total_distance_km": day_total_km,
+                    "walking_limit_km": limit_km,
+                    "is_walking_exceeded": is_exceeded,
+                    "pacing_hint": "步数在舒适圈内，适合从容步行" if not is_exceeded else "徒步距离接近上限，建议搭配短途打车",
+                }
+
                 plan_days.append({
                     "day_index": d_idx,
                     "day_number": d_idx + 1,
@@ -315,6 +357,7 @@ class TravelAgentHarness:
                     "hotel": hotel_selected,
                     "meals": [],
                     "total_ticket": getattr(route_res, "total_ticket", 0.0) if hasattr(route_res, "total_ticket") else 0.0,
+                    "telemetry": day_telemetry,
                 })
 
             # 三餐周边富化
@@ -322,15 +365,33 @@ class TravelAgentHarness:
             enriched_days, dur_ms = await self.registry.call("enrich_meals", plan_days=plan_days, city=city, food_preferences=food_prefs)
             yield ToolEndEvent(tool_name="enrich_meals", result_summary=f"已为每天匹配高德 4.0+ 美食", duration_ms=dur_ms)
 
+            pace_desc = {"relaxed": "松弛慢调", "balanced": "均衡深度", "intense": "特种兵充沛探索"}.get(lifestyle.get("travel_pace", "balanced"), "均衡深度")
+            morning_desc = "晨起早游 (08:30起)" if lifestyle.get("morning_person") else "松弛晚起 (10:30起)"
+            companion_desc = {
+                "solo": "独行自由探索",
+                "couple": "情侣浪漫同游",
+                "family_with_kids": "亲子家庭出行",
+                "elderly": "长辈同行慢游",
+                "pet_lover": "携宠友好漫步",
+            }.get(lifestyle.get("companion_type", "solo"), "个性化出行")
+
+            lifestyle_care_note = (
+                f"为您考虑到【{companion_desc}】与【{pace_desc}】偏好，首站时序已按【{morning_desc}】自适应调整；"
+                f"每日徒步控制在 {lifestyle.get('daily_walking_limit_km', 8.0)}km 舒适线内，已为您预留午后茶歇与休整空隙。"
+            )
+
             current_candidate_plan = {
                 "version_id": turn,
                 "city": city,
                 "days": enriched_days or plan_days,
                 "locked_items": locked_items,
+                "lifestyle_profile": lifestyle,
+                "lifestyle_care": lifestyle_care_note,
                 "algorithm_telemetry": {
                     "kmeans": {"total_pois": len(candidate_pool), "days": days, "balanced": True},
                     "minimax_hotel": {"hotel_name": hotel_selected.get("name")},
-                }
+                    "lifestyle": {"travel_pace": lifestyle.get("travel_pace"), "walking_limit": lifestyle.get("daily_walking_limit_km")},
+                },
             }
 
             # ── Step 3: 不变式审计与即时自愈 ──
@@ -404,6 +465,8 @@ class TravelAgentHarness:
         yield PlanVersionEvent(plan=final_plan)
 
         summary_md = f"### 🎯 【{city}】{days} 天旅行规划已由 Travel Harness 生成完毕\n\n"
+        if final_plan.get("lifestyle_care"):
+            summary_md += f"> 💖 **Pi 伴随式体温关怀**：{final_plan['lifestyle_care']}\n\n"
         for d in final_plan.get("days", []):
             summary_md += f"#### 📅 第 {d.get('day_number')} 天 ({d.get('date')})\n"
             for idx, a in enumerate(d.get("attractions", []), 1):

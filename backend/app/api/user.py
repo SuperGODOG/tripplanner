@@ -95,3 +95,40 @@ async def get_user_sessions(user_id: str):
         "sessions": sessions,
         "count": len(sessions),
     }
+
+
+class LifestyleUpdateRequest(BaseModel):
+    """生活方式画像更新载荷"""
+    daily_walking_limit_km: float | None = Field(default=None, ge=1.0, le=40.0, description="每日徒步上限 (km)")
+    morning_person: bool | None = Field(default=None, description="是否晨起习惯 (False -> 10:30起步)")
+    travel_pace: str | None = Field(default=None, description="节奏偏好: relaxed | balanced | intense")
+    companion_type: str | None = Field(default=None, description="同行特征: solo | couple | family_with_kids | elderly | pet_lover")
+    special_needs: list[str] | None = Field(default=None, description="特殊需求")
+    aesthetic_taste: list[str] | None = Field(default=None, description="美学与文化偏好标签")
+
+
+@router.get("/{user_id}/lifestyle")
+async def get_user_lifestyle(user_id: str):
+    """查询指定租户的生活方式与体温画像"""
+    repo = get_memory_repository()
+    return repo.get_lifestyle(user_id=user_id)
+
+
+@router.put("/{user_id}/lifestyle")
+async def update_user_lifestyle(user_id: str, payload: LifestyleUpdateRequest):
+    """更新指定租户的生活方式画像并主动失效私有规划缓存"""
+    repo = get_memory_repository()
+    updates = payload.model_dump(exclude_unset=True)
+    updated = repo.update_lifestyle(user_id=user_id, updates=updates)
+
+    cache = get_cache_manager()
+    cleared_count = cache.clear_scope(scope=f"user:{user_id}")
+    logger.info("用户 [%s] 更新生活方式画像，已定向清理私有缓存 %d 条", user_id, cleared_count)
+
+    return {
+        "status": "success",
+        "user_id": user_id,
+        "lifestyle": updated,
+        "cache_invalidated": cleared_count,
+    }
+
