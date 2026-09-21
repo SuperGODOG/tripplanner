@@ -140,3 +140,74 @@ def test_enrich_meals_respects_food_preferences():
     assert "陈麻婆豆腐(旗舰店)" in meal_names
     for m in meals:
         assert float(m["rating"]) >= 4.0
+
+
+def test_is_valid_scenic_poi_strictly_blocks_medical_and_accommodations():
+    """验证医疗卫生机构、住宿酒店与普通学校绝不渗入景点候选池（即使地名含'山'/'湖'）"""
+    medical_and_non_scenic = [
+        # 医疗类 (Typecode 09xxxx 或名称含医院/门诊/急救)
+        PoiCandidate(name="四川大学华西医院", category="医疗保健服务;综合医院;三级甲等医院", typecode="090101"),
+        PoiCandidate(name="乐山市妇幼保健院", category="医疗保健服务;专科医院;妇幼保健院", typecode="090200"),
+        PoiCandidate(name="乐山市人民医院", category="医疗保健服务;综合医院;综合医院", typecode="090100"),
+        PoiCandidate(name="峨眉山市中医院", category="医疗保健服务;综合医院;中医院", typecode="090102"),
+        PoiCandidate(name="华山医院", category="医疗保健服务;综合医院;三级甲等医院", typecode="090101"),
+        PoiCandidate(name="西湖区人民医院", category="医疗保健", typecode="090100"),
+        PoiCandidate(name="佛山市中医院", category="医疗保健服务", typecode="090102"),
+        PoiCandidate(name="北京协和医院", category="综合医院", typecode="090101"),
+        PoiCandidate(name="社区卫生服务中心", category="医疗保健服务", typecode="090400"),
+        PoiCandidate(name="爱尔眼科医院", category="医疗专科", typecode="090200"),
+        PoiCandidate(name="北京大学口腔医院", category="专科医院", typecode="090200"),
+        PoiCandidate(name="百信大药房", category="药店", typecode="090600"),
+        # 住宿酒店类 (Typecode 10xxxx 或名称含宾馆/酒店)
+        PoiCandidate(name="乐山宾馆", category="住宿服务;宾馆酒店;三星级宾馆", typecode="100103"),
+        PoiCandidate(name="峨眉山大酒店", category="住宿服务;宾馆酒店;五星级宾馆", typecode="100101"),
+        PoiCandidate(name="如家快捷酒店(西湖店)", category="住宿服务", typecode="100100"),
+        # 普通教育学校类 (Typecode 140/1410/1411/1414/1416/1420)
+        PoiCandidate(name="乐山第一中学", category="科教文化服务;学校;中学", typecode="141100"),
+        PoiCandidate(name="成都市实验小学", category="科教文化服务;学校;小学", typecode="141100"),
+        PoiCandidate(name="东方时尚驾校", category="培训机构", typecode="141400"),
+    ]
+
+    for p in medical_and_non_scenic:
+        assert is_valid_scenic_poi(p) is False, f"医疗/住宿/普通学校绝不可作为景点: {p.name} (typecode={p.typecode})"
+
+    # 对照组：真正带有“山”/“湖”的风景名胜必须放行
+    genuine_scenic = [
+        PoiCandidate(name="乐山大佛景区", category="国家级风景名胜区", typecode="110201"),
+        PoiCandidate(name="峨眉山金顶", category="风景名胜", typecode="110201"),
+        PoiCandidate(name="杭州西湖风景名胜区", category="国家5A级景区", typecode="110201"),
+        PoiCandidate(name="佛山祖庙", category="全国重点文物保护单位", typecode="141200"),
+        PoiCandidate(name="黄山风景区", category="国家级风景名胜区", typecode="110201"),
+    ]
+    for p in genuine_scenic:
+        assert is_valid_scenic_poi(p) is True, f"真正自然人文风景名胜必须放行: {p.name}"
+
+
+def test_search_attractions_blocks_hospitals_in_amap_results():
+    """测试 search_attractions_tool 在高德返回医疗机构时能 100% 过滤"""
+    class MockMixedHospitalWrapper:
+        def search_pois(self, city, stype, keywords="", center="", radius="", max_results=10):
+            return [
+                PoiCandidate(name="乐山大佛景区", category="国家级风景名胜区", typecode="110201"),
+                PoiCandidate(name="乐山市妇幼保健院", category="医疗保健服务", typecode="090200"),
+                PoiCandidate(name="乐山市人民医院", category="医疗保健服务", typecode="090100"),
+                PoiCandidate(name="乐山第一中学", category="普通中学", typecode="141100"),
+                PoiCandidate(name="乐山宾馆", category="住宿服务", typecode="100100"),
+                PoiCandidate(name="东方佛都", category="风景名胜", typecode="110200"),
+            ]
+
+    mock = MockMixedHospitalWrapper()
+    cands = search_attractions_tool(
+        city="乐山",
+        preferences=["自然风光"],
+        amap_wrapper=mock,
+        use_cache=False,
+    )
+    cand_names = [c.name for c in cands]
+    assert "乐山大佛景区" in cand_names
+    assert "东方佛都" in cand_names
+    assert "乐山市妇幼保健院" not in cand_names
+    assert "乐山市人民医院" not in cand_names
+    assert "乐山第一中学" not in cand_names
+    assert "乐山宾馆" not in cand_names
+

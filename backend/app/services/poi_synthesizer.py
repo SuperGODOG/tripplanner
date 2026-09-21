@@ -121,7 +121,10 @@ def synthesize_city_pois(
                 c_str = f"{center[0]},{center[1]}"
                 amap_res = wrapper.search_pois(clean_city, "around", "景点", c_str, "50000", max_results=10)
                 if amap_res:
+                    from ..tools.search_tools import is_valid_scenic_poi
                     for r in amap_res:
+                        if not is_valid_scenic_poi(r):
+                            continue
                         candidate_pool.append({
                             "name": r.name,
                             "lng": r.lng,
@@ -161,8 +164,11 @@ def synthesize_city_pois(
                 text = text.split("```")[1].split("```")[0].strip()
             parsed = json.loads(text)
             if isinstance(parsed, list) and len(parsed) >= 4:
-                candidate_pool = parsed
-                logger.info("LLM 成功动态合成【%s】的 %d 个真实 POI", clean_city, len(candidate_pool))
+                from ..tools.search_tools import is_valid_scenic_poi
+                valid_parsed = [p for p in parsed if isinstance(p, dict) and is_valid_scenic_poi(p)]
+                if len(valid_parsed) >= 4:
+                    candidate_pool = valid_parsed
+                    logger.info("LLM 成功动态合成【%s】的 %d 个真实 POI", clean_city, len(candidate_pool))
         except Exception as e:
             logger.info("LLM 动态合成跳过: %s", e)
 
@@ -184,6 +190,9 @@ def synthesize_city_pois(
     base_lat = candidate_pool[0]["lat"] if candidate_pool else (center[1] if center else 29.5)
 
     for lock_name in locks:
+        # 拦截明显的非景点/医疗/住宿/普通学校误锁
+        if any(bad in lock_name for bad in ("医院", "卫生院", "诊所", "门诊", "疾控", "卫生服务", "学校", "小学", "中学", "宾馆", "酒店")):
+            continue
         if not any(lock_name in p["name"] or p["name"] in lock_name for p in candidate_pool):
             candidate_pool.insert(0, {
                 "name": lock_name,
