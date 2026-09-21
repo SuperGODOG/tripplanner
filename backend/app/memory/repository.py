@@ -50,6 +50,72 @@ class MemoryRepository:
             )
         return manager.get_profile()
 
+    def add_footprint(self, user_id: str, poi_name: str, city: str) -> bool:
+        """记录用户已游览景点足迹 (幂等更新)"""
+        clean_poi = (poi_name or "").strip()
+        clean_city = (city or "").strip()
+        if not clean_poi or not clean_city:
+            return False
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO user_footprint (user_id, poi_name, city)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(user_id, poi_name, city) DO UPDATE SET
+                     visited_at = CURRENT_TIMESTAMP""",
+                (user_id, clean_poi, clean_city),
+            )
+        return True
+
+    def remove_footprint(self, user_id: str, poi_name: str, city: str) -> bool:
+        """移除用户已游览景点足迹"""
+        clean_poi = (poi_name or "").strip()
+        clean_city = (city or "").strip()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM user_footprint WHERE user_id = ? AND poi_name = ? AND city = ?",
+                (user_id, clean_poi, clean_city),
+            )
+            return cursor.rowcount > 0
+
+    def get_footprints(self, user_id: str, city: str | None = None) -> list[dict]:
+        """按租户严格隔离查询用户足迹（可选城市过滤）"""
+        with self._connect() as connection:
+            if city:
+                rows = connection.execute(
+                    """SELECT id, user_id, poi_name, city, visited_at
+                       FROM user_footprint
+                       WHERE user_id = ? AND city = ?
+                       ORDER BY visited_at DESC""",
+                    (user_id, city.strip()),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """SELECT id, user_id, poi_name, city, visited_at
+                       FROM user_footprint
+                       WHERE user_id = ?
+                       ORDER BY visited_at DESC""",
+                    (user_id,),
+                ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "user_id": r[1],
+                "poi_name": r[2],
+                "city": r[3],
+                "visited_at": str(r[4]),
+            }
+            for r in rows
+        ]
+
+    def is_visited(self, user_id: str, poi_name: str, city: str) -> bool:
+        """检查指定景点是否已被该用户游览打卡"""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM user_footprint WHERE user_id = ? AND poi_name = ? AND city = ? LIMIT 1",
+                (user_id, (poi_name or "").strip(), (city or "").strip()),
+            ).fetchone()
+            return row is not None
+
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
 
@@ -61,6 +127,20 @@ class MemoryRepository:
                     trip_count INTEGER NOT NULL,
                     entries_json TEXT NOT NULL
                 )"""
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS user_footprint (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    poi_name TEXT NOT NULL,
+                    city TEXT NOT NULL,
+                    visited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, poi_name, city)
+                )"""
+            )
+            connection.execute(
+                """CREATE INDEX IF NOT EXISTS idx_footprint_user_city
+                   ON user_footprint(user_id, city)"""
             )
 
 

@@ -30,6 +30,7 @@ from .invariants import TravelInvariants
 from .registry import ToolRegistry, travel_tools
 from .session_store import harness_session_store
 from ..agents.clarification_agent import extract_slots_from_input, check_clarification_needed
+from ..memory.repository import get_memory_repository
 from ..models.session import EffectiveRequirements, SlotOrigin
 from ..services.poi_synthesizer import synthesize_city_pois
 
@@ -47,16 +48,17 @@ class TravelAgentHarness:
         self,
         session_id: str,
         user_input: str,
+        user_id: str = "default_user",
         current_requirements: EffectiveRequirements | None = None,
         action_type: str | None = None,
         action_payload: dict[str, Any] | None = None,
     ) -> AsyncGenerator[HarnessEvent, None]:
         """运行单轮 Harness 主循环 (产出强类型异步事件流)"""
-        yield ThinkingEvent(step="init", detail=f"Harness 已接入会话 [{session_id}]，解析用户意图...")
+        yield ThinkingEvent(step="init", detail=f"Harness 已接入会话 [{session_id}] (租户: {user_id})，解析用户意图...")
 
         # 若未直接传入 requirements，则从本地会话存储中恢复已有状态
         if current_requirements is None:
-            saved_snap = harness_session_store.get(session_id)
+            saved_snap = harness_session_store.get(session_id, user_id=user_id)
             if saved_snap.effective_requirements and "slots" in saved_snap.effective_requirements:
                 try:
                     current_requirements = EffectiveRequirements(**saved_snap.effective_requirements)
@@ -93,6 +95,7 @@ class TravelAgentHarness:
             yield clar_event
             harness_session_store.update(
                 session_id=session_id,
+                user_id=user_id,
                 requirements=req,
                 locked_items=list(req.locked_items or []),
                 pending_clarification=clar_event.payload,
@@ -151,6 +154,37 @@ class TravelAgentHarness:
 
             if not candidate_pool:
                 candidate_pool = synthesize_city_pois(city=city, preferences=scenic_prefs, locked_items=locked_items)
+
+            # ── 用户历史足迹感知与已游览名胜自愈过滤 (Footprint Filtering) ──
+            repo = get_memory_repository()
+            user_footprints = repo.get_footprints(user_id=user_id, city=city)
+            visited_names = {f["poi_name"] for f in user_footprints}
+
+            if visited_names:
+                filtered_pool = []
+                excluded_names = []
+                for p in candidate_pool:
+                    p_name = p.get("name", "")
+                    # 若该景点已被用户打卡游览，且未被用户显式锁定 (locked_items)，则自动过滤
+                    if p_name in visited_names and p_name not in locked_items:
+                        excluded_names.append(p_name)
+                    else:
+                        filtered_pool.append(p)
+
+                if excluded_names:
+                    yield ThinkingEvent(
+                        step="footprint_filtered",
+                        detail=f"已结合用户【{user_id}】历史足迹，自动避开已游览名胜: {', '.join(excluded_names)}"
+                    )
+                    # 确保候选池有充足景点完成聚类规划（每天至少 2 个），若不足则补充合成
+                    if len(filtered_pool) < max(days * 2, 4):
+                        supplements = synthesize_city_pois(city=city, preferences=scenic_prefs, locked_items=locked_items)
+                        for sup in supplements:
+                            s_name = sup.get("name", "")
+                            if s_name not in visited_names and s_name not in {x.get("name") for x in filtered_pool}:
+                                filtered_pool.append(sup)
+                    if filtered_pool:
+                        candidate_pool = filtered_pool
 
             # ── Step 2: Agent 调用算法 (KMeans -> Minimax -> 2-Opt -> 三餐富化) ──
             yield ToolStartEvent(tool_name="cluster_days_kmeans", arguments={"days": days, "poi_count": len(candidate_pool)})
@@ -302,6 +336,7 @@ class TravelAgentHarness:
         # ── Step 6: 状态原子持久化与流式广播 ──
         harness_session_store.update(
             session_id=session_id,
+            user_id=user_id,
             requirements=req,
             current_plan=final_plan,
             locked_items=locked_items,

@@ -7,6 +7,7 @@ from ..config import get_settings, Settings
 from .trip import router as trip_router
 from .session import router as session_router
 from .harness_api import router as harness_router
+from .user import router as user_router
 
 try:
     settings = get_settings()
@@ -31,6 +32,7 @@ app.add_middleware(
 app.include_router(trip_router)
 app.include_router(session_router)
 app.include_router(harness_router)
+app.include_router(user_router)
 
 # 静态文件（前端 MVP）
 static_dir = Path(__file__).parent.parent.parent / "static"

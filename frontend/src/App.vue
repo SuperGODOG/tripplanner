@@ -29,6 +29,22 @@
             <span class="engine-pill">⚡ Sovereign Harness 极速内核</span>
           </div>
 
+          <!-- 👤 多租户身份切换器 (面向面试工程化隔离演示) -->
+          <div class="user-tenant-picker" title="切换租户身份，体验严格的会话、足迹与私有缓存隔离">
+            <span class="user-pill-icon">👤</span>
+            <select v-model="userId" @change="onUserChange" class="tenant-select">
+              <option value="demo_traveler">演示租户 (demo)</option>
+              <option value="alice_explorer">探索者 Alice</option>
+              <option value="bob_foodie">美食家 Bob</option>
+            </select>
+          </div>
+
+          <!-- 👣 我的足迹抽屉入口 -->
+          <button class="btn-footprints" @click="isFootprintDrawerOpen = true" title="查看并管理我的历史游览足迹">
+            <span>👣 我的足迹</span>
+            <span v-if="userFootprints.length" class="footprint-badge">{{ userFootprints.length }}</span>
+          </button>
+
           <span class="session-badge" title="当前会话 ID">
             <span class="pulse-dot"></span> {{ sessionId.slice(0, 8) }}...
           </span>
@@ -298,11 +314,12 @@
                     class="timeline-item"
                   >
                     <div class="timeline-dot"></div>
-                    <div class="attraction-card">
+                    <div :class="['attraction-card', isPoiVisited(attr.name) ? 'visited-card' : '']">
                       <div class="attr-header">
                         <div class="attr-name-wrap">
                           <span class="attr-name">{{ attr.name }}</span>
                           <span v-if="isItemLocked(attr.name)" class="lock-indicator" title="用户锁定项">🔒 锁定</span>
+                          <span v-if="isPoiVisited(attr.name)" class="visited-indicator" title="已录入您的历史足迹库">👣 已打卡</span>
                         </div>
                         <div class="attr-badges">
                           <!-- 高德官方真实评分 -->
@@ -321,6 +338,14 @@
                             {{ getFactLabel(attr.place_fact) }}
                           </span>
                           <span class="ticket-tag">¥{{ attr.price || attr.ticket_price || 0 }}</span>
+                          <!-- 👣 游览打卡/足迹标记按钮 -->
+                          <button
+                            :class="['btn-footprint-tag', isPoiVisited(attr.name) ? 'is-visited' : '']"
+                            :title="isPoiVisited(attr.name) ? '点击取消打卡' : '标记已去过，下次规划该城市将自动避开'"
+                            @click.stop="toggleFootprint(attr.name, currentPlan?.city || getSlotValue('city') || '北京')"
+                          >
+                            {{ isPoiVisited(attr.name) ? '✓ 已打卡' : '👣 去过?' }}
+                          </button>
                         </div>
                       </div>
 
@@ -429,16 +454,187 @@
           </div>
         </section>
       </main>
+
+      <!-- ════════ 全息足迹图谱抽屉 (Footprint Drawer) ════════ -->
+      <Transition name="fade">
+        <div v-if="isFootprintDrawerOpen" class="drawer-overlay" @click.self="isFootprintDrawerOpen = false">
+          <div class="footprint-drawer glass-panel">
+            <div class="drawer-header">
+              <div class="drawer-title">
+                <span class="drawer-icon">👣</span>
+                <span>我的历史游览足迹</span>
+                <span class="drawer-badge">{{ userFootprints.length }} 处已打卡</span>
+              </div>
+              <button class="btn-close-drawer" @click="isFootprintDrawerOpen = false" title="关闭">✕</button>
+            </div>
+
+            <div class="drawer-sub">
+              💡 <strong>智能避开机制</strong>：下次规划同城行程时，Harness 将自动过滤已打卡名胜，为您推荐全新未游览景点（除非在对话中显式锁定）。
+            </div>
+
+            <!-- 城市分组足迹列表 -->
+            <div class="drawer-body">
+              <div v-if="Object.keys(groupedFootprints).length === 0" class="empty-footprints">
+                <span class="empty-icon">🗺️</span>
+                <p class="empty-text">暂无已打卡游览足迹</p>
+                <span class="empty-sub">在右侧行程卡片中点击“去过?”打卡，或在下方手动录入历史去过的景点。</span>
+              </div>
+
+              <div v-for="(pois, cityName) in groupedFootprints" :key="cityName" class="city-footprint-group">
+                <div class="city-group-header">
+                  <span class="city-icon">📍</span>
+                  <span class="city-name">{{ cityName }}</span>
+                  <span class="city-count">{{ pois.length }} 处名胜</span>
+                </div>
+                <div class="city-poi-chips">
+                  <div v-for="item in pois" :key="item.id || item.poi_name" class="footprint-chip">
+                    <span class="chip-name">{{ item.poi_name }}</span>
+                    <button class="btn-remove-chip" @click="removeFootprintItem(item)" title="移除此足迹，后续规划可重新推荐">✕</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 手动录入打卡区 -->
+            <div class="drawer-footer">
+              <div class="manual-input-title">➕ 手动录入历史足迹：</div>
+              <div class="manual-input-row">
+                <input v-model="newFootprintCity" class="input-city" placeholder="城市 (如 北京)" />
+                <input v-model="newFootprintPoi" class="input-poi" placeholder="景点名称 (如 故宫博物院)" @keydown.enter="addManualFootprint" />
+                <button class="btn-add-footprint" :disabled="isAddingFootprint || !newFootprintPoi.trim()" @click="addManualFootprint">
+                  {{ isAddingFootprint ? '录入中...' : '+ 立即打卡' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 
-// ── 状态定义 ──
+// ── 多租户身份与会话状态定义 ──
+const userId = ref(localStorage.getItem('tp_user_id') || 'demo_traveler')
 const sessionId = ref(localStorage.getItem('tp_session_id') || ('sess_' + Math.random().toString(36).slice(2, 10)))
 localStorage.setItem('tp_session_id', sessionId.value)
+localStorage.setItem('tp_user_id', userId.value)
+
+// ── 足迹管理状态 ──
+const userFootprints = ref([])
+const isFootprintDrawerOpen = ref(false)
+const newFootprintCity = ref('北京')
+const newFootprintPoi = ref('')
+const isAddingFootprint = ref(false)
+
+const groupedFootprints = computed(() => {
+  const map = {}
+  for (const f of userFootprints.value) {
+    const c = f.city || '其他城市'
+    if (!map[c]) map[c] = []
+    map[c].push(f)
+  }
+  return map
+})
+
+async function loadUserFootprints() {
+  try {
+    const res = await fetch(`/api/user/${userId.value}/footprint`)
+    if (res.ok) {
+      const data = await res.json()
+      userFootprints.value = data.footprints || []
+    }
+  } catch (e) {
+    console.error('加载用户足迹失败', e)
+  }
+}
+
+function isPoiVisited(poiName) {
+  if (!poiName) return false
+  return userFootprints.value.some(f => f.poi_name === poiName)
+}
+
+async function toggleFootprint(poiName, city) {
+  if (!poiName) return
+  const targetCity = city || currentPlan.value?.city || getSlotValue('city') || '北京'
+  const alreadyVisited = isPoiVisited(poiName)
+  try {
+    if (alreadyVisited) {
+      const res = await fetch(`/api/user/${userId.value}/footprint`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ poi_name: poiName, city: targetCity }),
+      })
+      if (res.ok) {
+        userFootprints.value = userFootprints.value.filter(f => f.poi_name !== poiName)
+      }
+    } else {
+      const res = await fetch(`/api/user/${userId.value}/footprint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ poi_name: poiName, city: targetCity }),
+      })
+      if (res.ok) {
+        userFootprints.value.unshift({
+          id: Date.now(),
+          user_id: userId.value,
+          poi_name: poiName,
+          city: targetCity,
+          visited_at: new Date().toISOString(),
+        })
+      }
+    }
+  } catch (e) {
+    console.error('打卡操作失败', e)
+  }
+}
+
+async function addManualFootprint() {
+  if (!newFootprintPoi.value.trim()) return
+  isAddingFootprint.value = true
+  try {
+    const city = newFootprintCity.value.trim() || '北京'
+    const poi = newFootprintPoi.value.trim()
+    const res = await fetch(`/api/user/${userId.value}/footprint`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ poi_name: poi, city }),
+    })
+    if (res.ok) {
+      await loadUserFootprints()
+      newFootprintPoi.value = ''
+    }
+  } catch (e) {
+    console.error('手动添加足迹失败', e)
+  } finally {
+    isAddingFootprint.value = false
+  }
+}
+
+async function removeFootprintItem(item) {
+  try {
+    const res = await fetch(`/api/user/${userId.value}/footprint`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ poi_name: item.poi_name, city: item.city }),
+    })
+    if (res.ok) {
+      userFootprints.value = userFootprints.value.filter(
+        f => f.id !== item.id && !(f.poi_name === item.poi_name && f.city === item.city)
+      )
+    }
+  } catch (e) {
+    console.error('移除足迹失败', e)
+  }
+}
+
+function onUserChange() {
+  localStorage.setItem('tp_user_id', userId.value)
+  resetSession()
+  loadUserFootprints()
+}
 
 const mouseX = ref(0)
 const mouseY = ref(0)
@@ -589,6 +785,7 @@ async function sendChatRequest(text, actionPayload = null) {
     const endpoint = '/api/session/chat'
     const payload = {
       session_id: sessionId.value,
+      user_id: userId.value,
       input_text: text || '',
       action_type: actionPayload ? 'SET_SLOT' : null,
       action_payload: actionPayload,
@@ -597,7 +794,10 @@ async function sendChatRequest(text, actionPayload = null) {
 
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Id': userId.value,
+      },
       body: JSON.stringify(payload),
     })
 
@@ -724,9 +924,11 @@ function applyQuickPrompt(text) {
   submitUserMessage()
 }
 
-const CACHE_KEY_PREFIX = 'tp_state_'
+// ── 本地快照持久化与双轨恢复 (按租户命名空间严格隔离) ──
+function getCacheKey() {
+  return `tp_state_${userId.value}_${sessionId.value}`
+}
 
-// ── 本地快照持久化与双轨恢复 ──
 function saveSessionCache() {
   try {
     const cachePayload = {
@@ -737,7 +939,7 @@ function saveSessionCache() {
       attemptedActions: attemptedActions.value,
       updatedAt: Date.now(),
     }
-    localStorage.setItem(CACHE_KEY_PREFIX + sessionId.value, JSON.stringify(cachePayload))
+    localStorage.setItem(getCacheKey(), JSON.stringify(cachePayload))
   } catch (e) {
     console.warn('保存会话本地快照失败:', e)
   }
@@ -745,7 +947,7 @@ function saveSessionCache() {
 
 function loadSessionCache() {
   try {
-    const raw = localStorage.getItem(CACHE_KEY_PREFIX + sessionId.value)
+    const raw = localStorage.getItem(getCacheKey())
     if (!raw) return false
     const parsed = JSON.parse(raw)
     if (parsed.messages && parsed.messages.length) {
@@ -772,16 +974,24 @@ function loadSessionCache() {
 
 function clearSessionCache() {
   try {
-    localStorage.removeItem(CACHE_KEY_PREFIX + sessionId.value)
+    localStorage.removeItem(getCacheKey())
   } catch (e) {}
 }
 
 // ── 查询三轨状态快照与断点同步 ──
 async function fetchSessionState() {
   try {
-    const isHarness = selectedEngine.value === 'harness'
-    const endpoint = isHarness ? `/api/harness/session/${sessionId.value}/state` : `/api/session/${sessionId.value}/state`
-    const res = await fetch(endpoint)
+    const endpoint = `/api/session/${sessionId.value}/state`
+    const res = await fetch(endpoint, {
+      headers: {
+        'X-User-Id': userId.value,
+      },
+    })
+    if (res.status === 403) {
+      console.warn('当前会话不属于该租户，重置为新会话')
+      resetSession()
+      return
+    }
     if (!res.ok) return
     const data = await res.json()
     if (data.status === 'new') {
@@ -864,7 +1074,10 @@ onMounted(async () => {
   loadSessionCache()
   scrollToBottom()
 
-  // 2. 异步服务端状态同步与断点核验
+  // 2. 加载租户历史足迹
+  await loadUserFootprints()
+
+  // 3. 异步服务端状态同步与断点核验
   await fetchSessionState()
 })
 </script>
@@ -2004,8 +2217,305 @@ onMounted(async () => {
   .copilot-container {
     height: auto;
   }
-  .left-column, .right-column {
-    height: 700px;
-  }
+/* ── 多租户身份选择器 ── */
+.user-tenant-picker {
+  display: flex;
+  align-items: center;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  padding: 3px 8px;
+  gap: 4px;
+}
+.user-pill-icon {
+  font-size: 13px;
+}
+.tenant-select {
+  background: transparent;
+  border: none;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+}
+.tenant-select option {
+  background: #0f172a;
+  color: #f1f5f9;
+}
+
+/* ── 我的足迹顶部按钮 ── */
+.btn-footprints {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-footprints:hover {
+  background: rgba(16, 185, 129, 0.3);
+  color: #a7f3d0;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
+.footprint-badge {
+  background: #10b981;
+  color: #064e3b;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+/* ── 景点卡片足迹微交互 ── */
+.visited-indicator {
+  font-size: 11px;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.attraction-card.visited-card {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(6, 78, 59, 0.12);
+  box-shadow: inset 0 0 12px rgba(16, 185, 129, 0.08);
+}
+.btn-footprint-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #cbd5e1;
+}
+.btn-footprint-tag:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: #10b981;
+  color: #34d399;
+}
+.btn-footprint-tag.is-visited {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: rgba(16, 185, 129, 0.6);
+  color: #6ee7b7;
+  font-weight: 600;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.3);
+}
+
+/* ── 全息足迹图谱抽屉 (Footprint Drawer) ── */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  z-index: 999;
+  display: flex;
+  justify-content: flex-end;
+}
+.footprint-drawer {
+  width: 440px;
+  max-width: 90vw;
+  height: 100vh;
+  border-radius: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+}
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.drawer-badge {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.btn-close-drawer {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+.btn-close-drawer:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.1);
+}
+.drawer-sub {
+  padding: 10px 20px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #94a3b8;
+  background: rgba(16, 185, 129, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.drawer-sub strong {
+  color: #34d399;
+}
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.empty-footprints {
+  text-align: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+}
+.empty-footprints .empty-icon {
+  font-size: 40px;
+  display: block;
+  margin-bottom: 12px;
+}
+.empty-footprints .empty-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 6px;
+}
+.empty-footprints .empty-sub {
+  font-size: 12px;
+  color: #64748b;
+}
+.city-footprint-group {
+  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.city-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.city-name {
+  font-weight: 600;
+  color: #f1f5f9;
+  font-size: 14px;
+}
+.city-count {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.city-poi-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.footprint-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+.footprint-chip .chip-name {
+  font-weight: 500;
+}
+.btn-remove-chip {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 0.15s;
+}
+.btn-remove-chip:hover {
+  color: #f87171;
+}
+.drawer-footer {
+  padding: 16px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.8);
+}
+.manual-input-title {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+.manual-input-row {
+  display: flex;
+  gap: 8px;
+}
+.input-city {
+  width: 90px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #f8fafc;
+  font-size: 12px;
+  outline: none;
+}
+.input-poi {
+  flex: 1;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #f8fafc;
+  font-size: 12px;
+  outline: none;
+}
+.input-city:focus, .input-poi:focus {
+  border-color: #10b981;
+}
+.btn-add-footprint {
+  background: #10b981;
+  border: none;
+  color: #064e3b;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.btn-add-footprint:hover:not(:disabled) {
+  background: #34d399;
+}
+.btn-add-footprint:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 }
 </style>

@@ -12,7 +12,7 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -69,6 +69,7 @@ async def harness_stream_chat(request: HarnessChatRequest):
             async for event in harness.run(
                 session_id=request.session_id,
                 user_input=request.input_text,
+                user_id=request.user_id,
                 current_requirements=req_obj,
                 action_type=request.action_type,
                 action_payload=request.action_payload,
@@ -90,10 +91,14 @@ async def harness_stream_chat(request: HarnessChatRequest):
 
 
 @router.get("/session/{session_id}/state")
-async def get_harness_session_state(session_id: str):
-    """查询指定 Harness 会话的状态快照 (100% 契合前端 fetchSessionState)"""
+async def get_harness_session_state(session_id: str, x_user_id: str | None = Header(None)):
+    """查询指定 Harness 会话的状态快照 (100% 契合前端 fetchSessionState，支持多租户鉴权)"""
+    from fastapi import HTTPException
     from ..harness.session_store import harness_session_store
-    return harness_session_store.to_frontend_state(session_id)
+    try:
+        return harness_session_store.to_frontend_state(session_id, user_id=x_user_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
 
 @router.get("/tools")

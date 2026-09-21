@@ -32,23 +32,41 @@ class HarnessSessionSnapshot(BaseModel):
 
 
 class HarnessSessionStore:
-    """线程安全的内存+持久化会话存储引擎"""
+    """线程安全的内存+持久化会话存储引擎 (支持严格多租户数据隔离与属主鉴权)"""
 
-    def __init__(self, max_entries: int = 500):
+    def __init__(self, max_entries: int = 500, max_entries_per_user: int = 20):
         self._store: dict[str, HarnessSessionSnapshot] = {}
+        self._user_sessions: dict[str, list[str]] = {}  # user_id -> [session_id, ...]
         self._lock = threading.Lock()
         self._max_entries = max_entries
+        self._max_entries_per_user = max_entries_per_user
 
-    def get(self, session_id: str) -> HarnessSessionSnapshot:
-        """获取或初始化会话状态"""
+    def get(self, session_id: str, user_id: str | None = None) -> HarnessSessionSnapshot:
+        """获取或初始化会话状态（支持严格属主鉴权，防范横向越权 IDOR）"""
         with self._lock:
             if session_id not in self._store:
-                self._store[session_id] = HarnessSessionSnapshot(session_id=session_id)
-            return self._store[session_id]
+                snapshot = HarnessSessionSnapshot(
+                    session_id=session_id,
+                    user_id=user_id or "default_user",
+                )
+                self._store[session_id] = snapshot
+                u_id = snapshot.user_id
+                self._user_sessions.setdefault(u_id, []).append(session_id)
+                return snapshot
+
+            snapshot = self._store[session_id]
+            # 属主鉴权校验
+            if user_id and snapshot.user_id and snapshot.user_id != user_id and snapshot.user_id != "default_user":
+                raise PermissionError(
+                    f"会话属主鉴权失败: 会话 [{session_id}] 属于用户 [{snapshot.user_id}]，"
+                    f"当前租户 [{user_id}] 无权越权读取！"
+                )
+            return snapshot
 
     def update(
         self,
         session_id: str,
+        user_id: str | None = None,
         requirements: dict[str, Any] | EffectiveRequirements | None = None,
         current_plan: dict[str, Any] | None = None,
         locked_items: list[str] | None = None,
@@ -56,12 +74,27 @@ class HarnessSessionStore:
         new_assistant_message: str | None = None,
         pending_clarification: dict[str, Any] | None = None,
     ) -> HarnessSessionSnapshot:
-        """原子更新会话快照"""
+        """原子更新会话快照（兼顾租户私有 LRU 淘汰配额，防范 Noisy Neighbor 攻击）"""
         with self._lock:
             snapshot = self._store.get(session_id)
             if snapshot is None:
-                snapshot = HarnessSessionSnapshot(session_id=session_id)
+                snapshot = HarnessSessionSnapshot(
+                    session_id=session_id,
+                    user_id=user_id or "default_user",
+                )
                 self._store[session_id] = snapshot
+            elif user_id:
+                if snapshot.user_id and snapshot.user_id != user_id and snapshot.user_id != "default_user":
+                    raise PermissionError(
+                        f"会话属主鉴权失败: 会话 [{session_id}] 属于用户 [{snapshot.user_id}]，"
+                        f"租户 [{user_id}] 无权篡改！"
+                    )
+                snapshot.user_id = user_id
+
+            u_id = snapshot.user_id
+            u_list = self._user_sessions.setdefault(u_id, [])
+            if session_id not in u_list:
+                u_list.append(session_id)
 
             if requirements is not None:
                 if isinstance(requirements, EffectiveRequirements):
@@ -92,21 +125,30 @@ class HarnessSessionStore:
             snapshot.pending_clarification = pending_clarification
             snapshot.updated_at = time.time()
 
-            # 淘汰策略
+            # 1. 租户级私有 LRU 淘汰（单租户会话超额时，仅淘汰该租户的最旧会话，绝不影响其他租户）
+            if len(u_list) > self._max_entries_per_user:
+                oldest_user_sess = u_list.pop(0)
+                if oldest_user_sess != session_id:
+                    self._store.pop(oldest_user_sess, None)
+
+            # 2. 全局安全硬顶保护
             if len(self._store) > self._max_entries:
                 oldest = min(self._store.keys(), key=lambda k: self._store[k].updated_at)
                 if oldest != session_id:
                     del self._store[oldest]
+                    for u_k, s_list in self._user_sessions.items():
+                        if oldest in s_list:
+                            s_list.remove(oldest)
 
             return snapshot
 
-    def to_frontend_state(self, session_id: str) -> dict[str, Any]:
-        """输出与前端 App.vue fetchSessionState() 及测试 100% 契合的三轨状态结构"""
+    def to_frontend_state(self, session_id: str, user_id: str | None = None) -> dict[str, Any]:
+        """输出与前端 App.vue fetchSessionState() 及测试 100% 契合的三轨状态结构（支持属主鉴权）"""
         with self._lock:
             if session_id not in self._store:
                 return {
                     "session_id": session_id,
-                    "user_id": "default_user",
+                    "user_id": user_id or "default_user",
                     "status": "new",
                     "requirements": {},
                     "effective_requirements": {},
@@ -118,6 +160,11 @@ class HarnessSessionStore:
                     "revision_id": 1,
                 }
             snapshot = self._store[session_id]
+            if user_id and snapshot.user_id and snapshot.user_id != user_id and snapshot.user_id != "default_user":
+                raise PermissionError(
+                    f"会话属主鉴权失败: 会话 [{session_id}] 属于用户 [{snapshot.user_id}]，"
+                    f"当前租户 [{user_id}] 无权读取！"
+                )
             slots = snapshot.effective_requirements.get("slots", {}) if snapshot.effective_requirements else {}
             req_data = {
                 "slots": slots,
@@ -138,6 +185,11 @@ class HarnessSessionStore:
                 "attempted_actions": [],
                 "revision_id": 1,
             }
+
+    def list_user_sessions(self, user_id: str) -> list[str]:
+        """获取指定租户名下的所有会话 ID 列表"""
+        with self._lock:
+            return list(self._user_sessions.get(user_id, []))
 
 
 # 全局共享单例

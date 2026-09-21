@@ -12,7 +12,7 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -46,7 +46,7 @@ async def session_chat(request: ChatRequest, x_engine: str | None = Header(None)
     """统一多轮会话流式交互端点 (SSE)
 
     由 Sovereign Harness 极速内核独占驱动 (0.75s 亚秒级响应，纯内存零发热)，
-    原 LangGraph 状态机已正式退役成废案并拔除耦合。
+    支持租户数据隔离与历史足迹去重。
     """
     target_engine = (request.engine or x_engine or "harness").lower().strip()
     if target_engine == "langgraph":
@@ -60,6 +60,7 @@ async def session_chat(request: ChatRequest, x_engine: str | None = Header(None)
             async for event in harness.run(
                 session_id=request.session_id,
                 user_input=request.input_text,
+                user_id=request.user_id,
                 action_type=request.action_type,
                 action_payload=request.action_payload,
             ):
@@ -91,9 +92,12 @@ async def session_chat(request: ChatRequest, x_engine: str | None = Header(None)
 
 
 @router.get("/{session_id}/state")
-async def get_session_state(session_id: str):
-    """查询指定会话的当前三轨状态快照
+async def get_session_state(session_id: str, x_user_id: str | None = Header(None)):
+    """查询指定会话的当前三轨状态快照 (支持严格租户属主鉴权)
 
     纯内存极速 HarnessSessionStore，单轮毫秒级读取，100% 独立于外部图框架。
     """
-    return harness_session_store.to_frontend_state(session_id)
+    try:
+        return harness_session_store.to_frontend_state(session_id, user_id=x_user_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
