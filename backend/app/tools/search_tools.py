@@ -212,26 +212,46 @@ def _fetch_attractions(
     keywords = raw_prefs or ["景点"]
     center_str = f"{center[0]},{center[1]}" if center else ""
 
-    # 2. 构造高精度全景检索词池 (城市必游底座 + 用户偏好扩展 + 锁定项)
+    # 2. 构造高精度全景检索词池 (城市必游底座 + 动态空间实体高光 + 用户偏好扩展 + 锁定项)
+    from ..services.geo_entity_resolver import resolve_destination
+    resolved = resolve_destination(city)
+    target_city = resolved.canonical_name
+    search_scope_city = resolved.gateway_city or target_city or city
+
     extra_scenic_queries: list[str] = [
-        f"{city} 著名景点",
-        f"{city} 必游景点",
-        f"{city} 5A景区",
+        f"{target_city} 著名景点",
+        f"{target_city} 必游景点",
+        f"{target_city} 5A景区",
     ]
+    if city != target_city:
+        extra_scenic_queries.append(f"{city} 著名景点")
+
+    # 注入空间实体核心名胜与特征检索词 (如 川西 -> 四姑娘山, 稻城亚丁, 新都桥)
+    if resolved.core_pois:
+        for cp in resolved.core_pois:
+            clean_cp = cp.strip()
+            if clean_cp:
+                extra_scenic_queries.append(clean_cp)
+                extra_scenic_queries.append(f"{clean_cp} 景区")
+    if resolved.search_keywords:
+        for sk in resolved.search_keywords:
+            clean_sk = sk.strip()
+            if clean_sk:
+                extra_scenic_queries.append(clean_sk)
 
     # 用户偏好定向深度挖掘
     if scenic_prefs:
         for sp in scenic_prefs:
             if any(k in sp for k in ("历史", "文化", "古迹")):
-                extra_scenic_queries.extend([f"{city} 历史古迹", f"{city} 文博院馆"])
+                extra_scenic_queries.extend([f"{target_city} 历史古迹", f"{target_city} 文博院馆"])
             elif any(k in sp for k in ("自然", "风光", "山水", "户外")):
-                extra_scenic_queries.extend([f"{city} 自然名胜", f"{city} 森林公园"])
+                extra_scenic_queries.extend([f"{target_city} 自然名胜", f"{target_city} 森林公园"])
             elif any(k in sp for k in ("古镇", "老街")):
-                extra_scenic_queries.append(f"{city} 古镇名胜")
+                extra_scenic_queries.append(f"{target_city} 古镇名胜")
             else:
-                extra_scenic_queries.append(f"{city} {sp}")
+                extra_scenic_queries.append(f"{target_city} {sp}")
     else:
-        extra_scenic_queries.extend([f"{city} 旅游景点", f"{city} 风景名胜"])
+        extra_scenic_queries.extend([f"{target_city} 旅游景点", f"{target_city} 风景名胜"])
 
     # 深度注入用户锁定项（例如“峨眉山”），确保关键地标 100% 召回
     if locked_items:
@@ -247,13 +267,13 @@ def _fetch_attractions(
         futures = {}
         for kw in keywords:
             if center_str:
-                fut = pool.submit(wrapper.search_pois, city, "around", kw, center_str, "50000", max_results=20)
+                fut = pool.submit(wrapper.search_pois, search_scope_city, "around", kw, center_str, "50000", max_results=20)
             else:
-                fut = pool.submit(wrapper.search_pois, city, "attraction", kw, max_results=20)
+                fut = pool.submit(wrapper.search_pois, search_scope_city, "attraction", kw, max_results=20)
             futures[fut] = kw
 
         for eq in extra_scenic_queries:
-            fut = pool.submit(wrapper.search_pois, city, "attraction", eq, max_results=20)
+            fut = pool.submit(wrapper.search_pois, search_scope_city, "attraction", eq, max_results=20)
             futures[fut] = eq
 
         for fut in as_completed(futures):
@@ -289,8 +309,9 @@ def _fetch_attractions(
     # 4. 复合排序策略：锁定项 > 5A/世界遗产/国家级名胜 > 评分 > 知名度
     locks = [lk.strip() for lk in (locked_items or []) if lk.strip()]
 
-    def _rank_key(c: PoiCandidate) -> tuple[int, int, float, str]:
-        is_locked = 1 if any(lk in c.name for lk in locks) else 0
+    def _rank_key(c: PoiCandidate) -> tuple[int, int, int, float, str]:
+        exact_lock = 1 if any(lk == c.name for lk in locks) else 0
+        is_locked = 1 if any(lk in c.name or c.name in lk for lk in locks) else 0
         cat = c.category or ""
         is_grade_a = 1 if any(k in cat or k in c.name for k in ("5A", "世界遗产", "国家级景点", "国家重点", "全国重点文物保护单位")) else 0
         r_val = 0.0
@@ -299,7 +320,7 @@ def _fetch_attractions(
                 r_val = float(str(c.rating).strip())
             except Exception:
                 r_val = 0.0
-        return (is_locked, is_grade_a, r_val, c.name)
+        return (exact_lock, is_locked, is_grade_a, r_val, c.name)
 
     candidates.sort(key=_rank_key, reverse=True)
 

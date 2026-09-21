@@ -23,12 +23,16 @@ from ..models.session import (
 from ..memory.manager import is_persistent_preference
 from ..memory.context_compactor import compact_conversation_history
 
-# 常见热门目的地城市库
+from ..services.geo_entity_resolver import resolve_destination, DestinationType
+
+# 常见热门目的地城市与旅游大区库
 COMMON_CITIES = [
     "北京", "上海", "广州", "深圳", "成都", "重庆", "杭州", "西安", "南京",
     "武汉", "苏州", "天津", "厦门", "三亚", "青岛", "长沙", "郑州", "大连",
     "昆明", "哈尔滨", "沈阳", "济南", "福州", "南宁", "贵阳", "兰州", "拉萨",
     "银川", "西宁", "乌鲁木齐", "桂林", "洛阳", "黄山", "张家界", "九寨沟", "大理", "丽江",
+    "四川", "川西", "峨眉", "峨眉山", "乐山", "都江堰", "青城山", "云南", "贵州", "新疆",
+    "西藏", "青海", "甘肃", "海南", "康定", "稻城", "香格里拉", "敦煌",
 ]
 
 CN_NUM_MAP = {
@@ -58,19 +62,25 @@ def extract_slots_from_input(
     text: str,
     current_req: EffectiveRequirements | None = None,
 ) -> EffectiveRequirements:
-    """从自然语言文本中提取槽位并更新 EffectiveRequirements"""
+    """从自然语言文本中提取槽位并更新 EffectiveRequirements (支持中途改口突变与分级地理归一)"""
     req = current_req or EffectiveRequirements()
     if not text or not text.strip():
         return req
 
-    # 1. 城市与名胜抽取 (支持复合目的地与名山大川)
-    # 知名旅游名胜与所属行政区映射
+    # 1. 城市与名胜抽取 (支持复合目的地、线路大区、改口突变与名山大川)
     FAMOUS_LANDMARK_CITY_MAP = {
-        "峨眉山": "乐山",
+        "峨眉山": "峨眉山",
+        "峨眉": "峨眉山",
         "乐山大佛": "乐山",
-        "都江堰": "成都",
-        "青城山": "成都",
-        "九寨沟": "阿坝",
+        "乐山": "乐山",
+        "川西": "川西",
+        "四姑娘山": "川西",
+        "新都桥": "川西",
+        "稻城亚丁": "川西",
+        "都江堰": "都江堰",
+        "青城山": "青城山",
+        "九寨沟": "九寨沟",
+        "九寨": "九寨沟",
         "黄山": "黄山",
         "张家界": "张家界",
         "西湖": "杭州",
@@ -82,39 +92,74 @@ def extract_slots_from_input(
         "华山": "渭南",
         "普陀山": "舟山",
         "武夷山": "南平",
+        "三星堆": "四川",
+    }
+
+    excluded_words = {
+        "旅游", "出游", "玩耍", "度假", "散心", "散散", "散散心", "放松", "透气",
+        "转转", "逛逛", "看看", "走走", "玩", "地方", "哪里", "火星", "月球",
+        "月亮", "太阳", "外太空", "太空", "银河系", "宇宙", "亚特兰蒂斯",
+        "赛博朋克", "元宇宙", "天堂", "地狱", "地府", "霍格沃茨", "潘多拉", "虚无之地"
     }
 
     extracted_city = None
-    # 优先匹配长地名与名山大川
     matched_landmarks = []
-    for lm, mapped_city in FAMOUS_LANDMARK_CITY_MAP.items():
-        if lm in text:
-            matched_landmarks.append(lm)
-            if not extracted_city:
-                extracted_city = mapped_city
 
-    for city in COMMON_CITIES:
-        if city in text:
-            extracted_city = city
-            break
+    steer_match = re.search(
+        r"(?:改成|改去|改为|换成|换去|换到|转去|转战|又改|改|变更为|还是去|要不去|要不|想去|打算去|去|到|目的地[是为]?)\s*([\u4e00-\u9fa5]{2,6}?)(?:市|区|省)?(?=[0-9一二两三四五六七八九十]|天|日|玩|吧|呢|呀|呗|啊|\s|$|[，。！？,\.!?])",
+        text
+    )
+    if steer_match:
+        cand = steer_match.group(1).replace("市", "").replace("省", "").strip()
+        for suffix in ("旅游", "旅行", "出游", "度假", "玩耍"):
+            if cand.endswith(suffix) and len(cand) > len(suffix):
+                cand = cand[:-len(suffix)]
+        if cand and cand not in excluded_words and len(cand) in (2, 3, 4, 5, 6):
+            for c_name in COMMON_CITIES:
+                if cand.startswith(c_name) and len(cand) > len(c_name):
+                    matched_landmarks.append(cand[len(c_name):])
+                    cand = c_name
+                    break
+            extracted_city = cand
 
+    # B. 匹配知名名胜与线路大区映射
+    if not extracted_city:
+        for lm, mapped_city in FAMOUS_LANDMARK_CITY_MAP.items():
+            if lm in text:
+                matched_landmarks.append(lm)
+                if not extracted_city:
+                    extracted_city = mapped_city
+
+    # C. 匹配标准热门城市词表
+    if not extracted_city:
+        for city in COMMON_CITIES:
+            if city in text:
+                extracted_city = city
+                break
+
+    # D. 兜底正则
     if not extracted_city:
         city_match = re.search(r"(?:去|到|想去|目的地[是为]?)\s*([\u4e00-\u9fa5]{2,6}?(?:市|区)?)", text)
         if city_match:
             candidate = city_match.group(1).replace("市", "").strip()
-            excluded_words = {
-                "旅游", "出游", "玩耍", "度假", "散心", "散散", "散散心", "放松", "透气",
-                "转转", "逛逛", "看看", "走走", "玩", "地方", "哪里", "火星", "月球",
-                "月亮", "太阳", "外太空", "太空", "银河系", "宇宙", "亚特兰蒂斯",
-                "赛博朋克", "元宇宙", "天堂", "地狱", "地府", "霍格沃茨", "潘多拉", "虚无之地"
-            }
             if len(candidate) in (2, 3, 4) and candidate not in excluded_words:
                 extracted_city = candidate
 
     if extracted_city:
-        req.set_slot("city", extracted_city, origin=SlotOrigin.USER_EXPLICIT)
+        resolved = resolve_destination(extracted_city)
+        canonical_city = resolved.canonical_name
+        prev_city = req.get_slot_value("city")
+        # 若发生城市/大区改口，自动清退前序城市的旧专属锁定项（如北京的故宫），防止跨城污染
+        if prev_city and prev_city != canonical_city:
+            req.locked_items = []
 
-    # 提取到的名胜直接注入锁定项（如峨眉山、乐山大佛）
+        req.set_slot("city", canonical_city, origin=SlotOrigin.USER_EXPLICIT)
+
+        # 若是知名景区类目的地（如峨眉山、九寨沟），自动注入核心地标锁定项保护
+        if resolved.dest_type == DestinationType.SCENIC_AREA and canonical_city not in req.locked_items:
+            req.locked_items.append(canonical_city)
+
+    # 提取到的名胜直接注入锁定项
     for lm in matched_landmarks:
         if lm not in req.locked_items:
             req.locked_items.append(lm)

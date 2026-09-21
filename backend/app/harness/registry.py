@@ -75,7 +75,7 @@ travel_tools = ToolRegistry()
 
 @travel_tools.register("search_scenic_pois", "高德真实人文/自然风景名胜检索 (白名单守门)")
 def _tool_search_scenic(city: str, preferences: list[str] | None = None, **kwargs: Any):
-    return search_attractions_tool(city=city, preferences=preferences or [])
+    return search_attractions_tool(city=city, preferences=preferences or [], locked_items=kwargs.get("locked_items"))
 
 
 @travel_tools.register("cluster_days_kmeans", "基于 Balanced K-Means 的空间均衡分日聚簇")
@@ -90,7 +90,14 @@ def _tool_minimax_hotel(city: str, attraction_coords: list[dict[str, Any]], **kw
 
 @travel_tools.register("solve_2opt_route", "基于 2-Opt TSP 局部搜索的最优游览时序求解")
 def _tool_2opt_route(pois: list[dict[str, Any]], **kwargs: Any):
-    return solve_day_route_tool(pois=pois)
+    return solve_day_route_tool(
+        pois=pois,
+        immutable_names=kwargs.get("immutable_names"),
+        start_hotel=kwargs.get("start_hotel"),
+        start_hour=kwargs.get("start_hour", 9),
+        close_hour=kwargs.get("close_hour", 20),
+        day_index=kwargs.get("day_index", 0),
+    )
 
 
 @travel_tools.register("enrich_meals", "结合用户美食偏好周边检索高德 4.0+ 评分餐厅")

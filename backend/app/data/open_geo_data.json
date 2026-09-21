@@ -71,5 +71,44 @@
       {"name": "宋城", "lng": 120.106, "lat": 30.177, "visit_minutes": 200, "price": 320, "category": "主题乐园", "district": "西湖区"},
       {"name": "清河坊街", "lng": 120.169, "lat": 30.240, "visit_minutes": 90, "price": 0, "category": "历史古街", "district": "上城区"}
     ]
+  },
+  "峨眉": {
+    "center": [103.337, 29.526],
+    "pois": [
+      {"name": "峨眉山金顶", "lng": 103.337, "lat": 29.526, "visit_minutes": 240, "price": 160, "category": "名山胜景", "district": "峨眉山市"},
+      {"name": "峨眉山万年寺", "lng": 103.385, "lat": 29.582, "visit_minutes": 120, "price": 10, "category": "宗教古刹", "district": "峨眉山市"},
+      {"name": "峨眉山清音阁", "lng": 103.417, "lat": 29.574, "visit_minutes": 120, "price": 0, "category": "自然山水", "district": "峨眉山市"},
+      {"name": "报国寺", "lng": 103.443, "lat": 29.571, "visit_minutes": 90, "price": 8, "category": "古刹寺庙", "district": "峨眉山市"},
+      {"name": "伏虎寺", "lng": 103.435, "lat": 29.563, "visit_minutes": 90, "price": 6, "category": "佛教古寺", "district": "峨眉山市"},
+      {"name": "乐山大佛", "lng": 103.771, "lat": 29.553, "visit_minutes": 180, "price": 80, "category": "历史名胜", "district": "乐山市市中区"},
+      {"name": "峨眉山雷洞坪", "lng": 103.342, "lat": 29.539, "visit_minutes": 120, "price": 0, "category": "高山风光", "district": "峨眉山市"},
+      {"name": "苏稽古镇(翘脚牛肉发源地)", "lng": 103.655, "lat": 29.566, "visit_minutes": 120, "price": 0, "category": "特色美食街区", "district": "乐山市市中区"}
+    ]
+  },
+  "川西": {
+    "center": [101.962, 30.051],
+    "pois": [
+      {"name": "四姑娘山双桥沟", "lng": 102.836, "lat": 31.066, "visit_minutes": 240, "price": 150, "category": "高原雪山", "district": "阿坝州小金县"},
+      {"name": "新都桥十里画廊", "lng": 101.523, "lat": 30.051, "visit_minutes": 150, "price": 0, "category": "摄影天堂", "district": "甘孜州康定市"},
+      {"name": "折多山观雪台", "lng": 101.815, "lat": 30.038, "visit_minutes": 60, "price": 0, "category": "康巴第一关", "district": "甘孜州康定市"},
+      {"name": "墨石公园景区", "lng": 101.583, "lat": 30.566, "visit_minutes": 180, "price": 60, "category": "异域地质", "district": "甘孜州道孚县"},
+      {"name": "塔公草原与木雅金塔", "lng": 101.522, "lat": 30.327, "visit_minutes": 120, "price": 20, "category": "高山草原", "district": "甘孜州康定市"},
+      {"name": "木格措风景区(野人海)", "lng": 101.859, "lat": 30.176, "visit_minutes": 200, "price": 105, "category": "高原湖泊", "district": "甘孜州康定市"},
+      {"name": "甲居藏寨", "lng": 101.882, "lat": 30.916, "visit_minutes": 180, "price": 50, "category": "民俗藏寨", "district": "甘孜州丹巴县"},
+      {"name": "海螺沟冰川森林公园", "lng": 102.046, "lat": 29.583, "visit_minutes": 240, "price": 90, "category": "低海拔冰川", "district": "甘孜州泸定县"}
+    ]
+  },
+  "四川": {
+    "center": [104.066, 30.572],
+    "pois": [
+      {"name": "成都大熊猫繁育研究基地", "lng": 104.144, "lat": 30.738, "visit_minutes": 200, "price": 55, "category": "动植物园", "district": "成都市成华区"},
+      {"name": "都江堰水利风景区", "lng": 103.619, "lat": 30.998, "visit_minutes": 180, "price": 80, "category": "世界遗产", "district": "成都市都江堰市"},
+      {"name": "青城山前山风景区", "lng": 103.568, "lat": 30.901, "visit_minutes": 210, "price": 80, "category": "道教名山", "district": "成都市都江堰市"},
+      {"name": "广汉三星堆博物馆", "lng": 104.269, "lat": 31.000, "visit_minutes": 210, "price": 72, "category": "考古文博", "district": "德阳市广汉市"},
+      {"name": "乐山大佛", "lng": 103.771, "lat": 29.553, "visit_minutes": 180, "price": 80, "category": "历史名胜", "district": "乐山市市中区"},
+      {"name": "武侯祠·锦里古街", "lng": 104.048, "lat": 30.646, "visit_minutes": 150, "price": 50, "category": "三国文化", "district": "成都市武侯区"},
+      {"name": "宽窄巷子", "lng": 104.053, "lat": 30.663, "visit_minutes": 120, "price": 0, "category": "民俗街区", "district": "成都市青羊区"},
+      {"name": "杜甫草堂", "lng": 104.028, "lat": 30.660, "visit_minutes": 120, "price": 50, "category": "历史名人", "district": "成都市青羊区"}
+    ]
   }
 }

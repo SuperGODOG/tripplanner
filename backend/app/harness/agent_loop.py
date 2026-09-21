@@ -96,10 +96,13 @@ class TravelAgentHarness:
                     req.set_slot(extra_key, action_payload[extra_key], origin=SlotOrigin.USER_EXPLICIT)
 
         curr_city = req.get_slot_value("city")
+        from ..services.geo_entity_resolver import resolve_destination
+        resolved_steering = resolve_destination(curr_city or "北京") if curr_city else None
         if is_steering or (prev_city and curr_city and prev_city != curr_city):
+            disp = f"【{resolved_steering.canonical_name}】({resolved_steering.display_name})" if resolved_steering else f"【{curr_city}】"
             yield ThinkingEvent(
                 step="midturn_steered",
-                detail=f"⚡ 检测到中途改口转向：已安全继承已有游玩天数与作息画像，正在原地热切换至【{curr_city}】..."
+                detail=f"⚡ 检测到中途改口转向：已安全继承已有游玩天数与作息画像，正在原地热切换至{disp}..."
             )
 
         # ── 主动澄清拦截：使用标准 check_clarification_needed 评估核心槽位完备性 ──
@@ -140,9 +143,10 @@ class TravelAgentHarness:
         if not food_prefs:
             food_prefs = [p for p in all_prefs if p in food_vocab]
 
+        resolved_dest = resolve_destination(city)
         yield ThinkingEvent(
             step="requirements_parsed",
-            detail=f"识别目的地: {city}, 天数: {days}天, 景点偏好: {scenic_prefs or '全城经典'}, 美食偏好: {food_prefs or '地道美食'}"
+            detail=f"识别目的地: {resolved_dest.canonical_name} ({resolved_dest.display_name}), 天数: {days}天, 景点偏好: {scenic_prefs or '全城经典'}, 美食偏好: {food_prefs or '地道美食'}"
         )
 
         # ── 伴随式画像挂载：读取租户生活方式与作息体温特征 (Pi Companion Memory) ──
@@ -156,11 +160,12 @@ class TravelAgentHarness:
         )
 
         # ── 地图动作：Agent as Map Controller (FLY_TO 城市全局视口) ──
-        center_coord = get_city_center(city)
+        center_coord = get_city_center(city) or resolved_dest.center_coord
         center_lng_lat = [float(center_coord[0]), float(center_coord[1])] if center_coord else [116.407, 39.904]
+        zoom_lvl = 8 if resolved_dest.dest_type.value in ("province", "tourism_region") else 12
         yield MapActionEvent(
             action="FLY_TO",
-            data={"city": city, "center": center_lng_lat, "zoom": 12, "title": f"定位至目的地【{city}】"}
+            data={"city": city, "center": center_lng_lat, "zoom": zoom_lvl, "title": f"定位至目的地【{resolved_dest.canonical_name}】"}
         )
 
         turn = 0
@@ -175,8 +180,16 @@ class TravelAgentHarness:
                 yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="检测到中途改口，已安全中断名胜检索")
                 return
 
-            yield ToolStartEvent(tool_name="search_scenic_pois", arguments={"city": city, "preferences": scenic_prefs})
-            raw_cands, dur_ms = await self.registry.call("search_scenic_pois", city=city, preferences=scenic_prefs)
+            call_kwargs: dict[str, Any] = {"city": city, "preferences": scenic_prefs}
+            t_def = self.registry.get_tool("search_scenic_pois")
+            if t_def and hasattr(t_def, "func"):
+                import inspect
+                sig = inspect.signature(t_def.func)
+                if "locked_items" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    call_kwargs["locked_items"] = locked_items
+
+            yield ToolStartEvent(tool_name="search_scenic_pois", arguments=call_kwargs)
+            raw_cands, dur_ms = await self.registry.call("search_scenic_pois", **call_kwargs)
             yield ToolEndEvent(tool_name="search_scenic_pois", result_summary=f"召回 {len(raw_cands or [])} 处有效名胜", duration_ms=dur_ms)
 
             candidate_pool = []
@@ -197,6 +210,23 @@ class TravelAgentHarness:
 
             if not candidate_pool:
                 candidate_pool = synthesize_city_pois(city=city, preferences=scenic_prefs, locked_items=locked_items)
+
+            # 若用户显式指定锁定地标，且候选池仅返回了其分院/子景点（如 故宫博物院-神武门），自动对齐提升主地标
+            for lk in (locked_items or []):
+                exact_match = next((p for p in candidate_pool if p["name"] == lk), None)
+                if not exact_match:
+                    sub_match = next((p for p in candidate_pool if p["name"].startswith(f"{lk}-") or p["name"].startswith(f"{lk}(")), None)
+                    if sub_match:
+                        candidate_pool.insert(0, {
+                            "name": lk,
+                            "lng": sub_match["lng"],
+                            "lat": sub_match["lat"],
+                            "category": sub_match.get("category") or "世界文化遗产",
+                            "typecode": sub_match.get("typecode") or "110000",
+                            "price": sub_match.get("price") or 60.0,
+                            "rating": 4.9,
+                            "visit_minutes": 180,
+                        })
 
             # ── 用户历史足迹感知与已游览名胜自愈过滤 (Footprint Filtering) ──
             repo = get_memory_repository()
@@ -312,7 +342,23 @@ class TravelAgentHarness:
                     return
 
                 yield ToolStartEvent(tool_name="solve_2opt_route", arguments={"day": d_idx + 1, "poi_count": len(day_pois)})
-                route_res, dur_ms = await self.registry.call("solve_2opt_route", pois=day_pois)
+                opt_kwargs: dict[str, Any] = {"pois": day_pois}
+                t_def_opt = self.registry.get_tool("solve_2opt_route")
+                if t_def_opt and hasattr(t_def_opt, "func"):
+                    import inspect
+                    sig_opt = inspect.signature(t_def_opt.func)
+                    if "immutable_names" in sig_opt.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_opt.parameters.values()):
+                        opt_kwargs["immutable_names"] = locked_items
+                    if "start_hotel" in sig_opt.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_opt.parameters.values()):
+                        opt_kwargs["start_hotel"] = hotel_selected
+                    if "day_index" in sig_opt.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_opt.parameters.values()):
+                        opt_kwargs["day_index"] = d_idx
+                else:
+                    opt_kwargs["immutable_names"] = locked_items
+                    opt_kwargs["start_hotel"] = hotel_selected
+                    opt_kwargs["day_index"] = d_idx
+
+                route_res, dur_ms = await self.registry.call("solve_2opt_route", **opt_kwargs)
                 yield ToolEndEvent(tool_name="solve_2opt_route", result_summary=f"路线优化完成", duration_ms=dur_ms)
 
                 ordered_attrs = []
