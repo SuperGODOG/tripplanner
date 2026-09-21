@@ -13,9 +13,11 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from ..services.calendar_exporter import export_itinerary_to_ics
 
 from ..harness.agent_loop import TravelAgentHarness
 from ..harness.coordinator import execution_coordinator
@@ -141,3 +143,62 @@ async def get_session_state(session_id: str, x_user_id: str | None = Header(None
         return harness_session_store.to_frontend_state(session_id, user_id=x_user_id)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+
+class CalendarExportRequest(BaseModel):
+    plan: dict[str, Any]
+    city: str = ""
+    calendar_title: str = ""
+
+
+@router.get("/{session_id}/calendar.ics")
+async def export_session_calendar_ics(session_id: str, x_user_id: str | None = Header(None)):
+    """导出指定会话当前行程为 RFC 5545 iCalendar (.ics) 标准日历文件"""
+    try:
+        snapshot = harness_session_store.get(session_id, user_id=x_user_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    if not snapshot or not snapshot.current_plan:
+        raise HTTPException(status_code=404, detail="未找到该会话的有效行程规划")
+
+    city = ""
+    if snapshot.effective_requirements:
+        city = snapshot.effective_requirements.get_slot_value("city") or ""
+
+    ics_content = export_itinerary_to_ics(
+        plan=snapshot.current_plan,
+        city=city,
+        calendar_title=f"{city or '智能旅行'} 行程日历 [TripPlanner]",
+    )
+
+    from urllib.parse import quote
+    safe_city = city or "itinerary"
+    encoded_fn = quote(f"{safe_city}_calendar.ics")
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"itinerary.ics\"; filename*=UTF-8''{encoded_fn}",
+        "Content-Type": "text/calendar; charset=utf-8",
+    }
+    return Response(content=ics_content, media_type="text/calendar", headers=headers)
+
+
+@router.post("/calendar/export")
+async def export_custom_calendar_ics(request: CalendarExportRequest):
+    """直接将前端传入的行程数据转换为 RFC 5545 .ics 文件流"""
+    if not request.plan:
+        raise HTTPException(status_code=400, detail="行程数据不可为空")
+
+    ics_content = export_itinerary_to_ics(
+        plan=request.plan,
+        city=request.city,
+        calendar_title=request.calendar_title or f"{request.city or '智能旅行'} 行程日历 [TripPlanner]",
+    )
+
+    from urllib.parse import quote
+    safe_city = request.city or "itinerary"
+    encoded_fn = quote(f"{safe_city}_calendar.ics")
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"itinerary.ics\"; filename*=UTF-8''{encoded_fn}",
+        "Content-Type": "text/calendar; charset=utf-8",
+    }
+    return Response(content=ics_content, media_type="text/calendar", headers=headers)

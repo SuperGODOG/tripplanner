@@ -401,6 +401,23 @@ class TravelAgentHarness:
                 else:
                     ordered_attrs = day_pois
 
+                # ── 热门地标预约时效与售罄预警评估 (Reservation Policy Guard) ──
+                from ..services.reservation_policy import evaluate_poi_reservation
+                day_critical_alerts = []
+                for p_attr in ordered_attrs:
+                    p_name = p_attr.get("name", "")
+                    r_alert = evaluate_poi_reservation(p_name, visit_date=day_date, planning_date=base_date)
+                    if r_alert:
+                        p_attr["reservation_alert"] = r_alert
+                        if r_alert.get("risk_level") == "critical":
+                            day_critical_alerts.append(f"{p_name}(需提前{r_alert.get('lead_days')}天预约，可能已售罄，建议备选{r_alert.get('backup_poi')})")
+
+                if day_critical_alerts:
+                    yield ThinkingEvent(
+                        step="reservation_alert",
+                        detail=f"第 {d_idx + 1} 天预约预警: 检测到【{'; '.join(day_critical_alerts)}】"
+                    )
+
                 # 发射地图动作：绘制当前天 2-Opt 路径收敛折线 (DRAW_ROUTE)
                 polyline = [
                     [float(p.get("lng", 0.0)), float(p.get("lat", 0.0))]

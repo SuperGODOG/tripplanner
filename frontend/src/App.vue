@@ -337,7 +337,23 @@
               </div>
             </div>
 
-            <!-- 4. 行程分日详情列表 -->
+            <!-- 4. 行程分日详情列表与日历导出操作栏 -->
+            <div v-if="currentPlan && currentPlan.days && currentPlan.days.length" class="itinerary-actions-bar">
+              <div class="itinerary-title-badge">
+                <span class="itinerary-city-name">📍 {{ currentPlan.city || getSlotValue('city') || '智能旅行' }}</span>
+                <span class="itinerary-summary-count">{{ currentPlan.days.length }} 日游 · 共 {{ totalAttractionCount }} 处名胜</span>
+              </div>
+              <button
+                class="btn-export-calendar"
+                :disabled="isExportingCalendar"
+                @click="exportCalendarICS"
+                title="导出 RFC 5545 iCalendar 标准日历文件，一键批量导入 Apple / Google / 华为系统日历"
+              >
+                <span class="cal-icon">📅</span>
+                <span>{{ isExportingCalendar ? '正在生成日历...' : '导出手机日历 (.ics)' }}</span>
+              </button>
+            </div>
+
             <div v-if="currentPlan && currentPlan.days && currentPlan.days.length" class="itinerary-days">
               <div
                 v-for="day in currentPlan.days"
@@ -462,6 +478,26 @@
                       <div v-if="attr.address" class="attr-address-line">
                         <span class="addr-icon">📍</span>
                         <span class="addr-text">{{ attr.address }}</span>
+                      </div>
+
+                      <!-- ⚠️ 热门名胜实名预约时效与售罄预警 (Reservation Policy Guard) -->
+                      <div v-if="attr.reservation_alert" class="reservation-alert-box" :class="attr.reservation_alert.risk_level">
+                        <div class="alert-head">
+                          <span class="alert-badge-pill">
+                            {{ attr.reservation_alert.risk_level === 'critical' ? '🚨 提前抢票强预警' : (attr.reservation_alert.risk_level === 'urgent' ? '🔥 门票今日放票中' : '📅 预约备忘') }}
+                          </span>
+                          <span class="alert-title">{{ attr.reservation_alert.alert_title }}</span>
+                        </div>
+                        <div class="alert-body">
+                          <p class="alert-detail">{{ attr.reservation_alert.alert_detail }}</p>
+                          <div class="alert-meta-chips">
+                            <span class="meta-chip">⏰ 放票时刻: 每日 {{ attr.reservation_alert.release_time }}</span>
+                            <span class="meta-chip">📲 官方入口: {{ attr.reservation_alert.booking_channel }}</span>
+                            <span v-if="attr.reservation_alert.backup_poi" class="meta-chip backup" title="若出行前官方余票已售罄，建议改道本备选名胜">
+                              🔄 满票备选: {{ attr.reservation_alert.backup_poi }}
+                            </span>
+                          </div>
+                        </div>
                       </div>
 
                       <!-- 真实 Web RAG: 实时联网活数据 (Tavily 搜索引擎实时提取) -->
@@ -1134,6 +1170,50 @@ async function loadUserFootprints() {
     }
   } catch (e) {
     console.error('加载用户足迹失败', e)
+  }
+}
+
+const isExportingCalendar = ref(false)
+
+const totalAttractionCount = computed(() => {
+  if (!currentPlan.value || !currentPlan.value.days) return 0
+  return currentPlan.value.days.reduce((acc, d) => acc + (d.attractions || []).length, 0)
+})
+
+async function exportCalendarICS() {
+  if (!currentPlan.value || !currentPlan.value.days || !currentPlan.value.days.length) {
+    alert('当前暂无可导出的行程数据')
+    return
+  }
+  isExportingCalendar.value = true
+  try {
+    const targetCity = currentPlan.value.city || getSlotValue('city') || '智能旅行'
+    const res = await fetch('/api/session/calendar/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        plan: currentPlan.value,
+        city: targetCity,
+        calendar_title: `${targetCity} ${currentPlan.value.days.length}日游 [TripPlanner]`,
+      }),
+    })
+    if (!res.ok) {
+      throw new Error(`日历服务响应异常: ${res.statusText}`)
+    }
+    const blob = await res.blob()
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = `${targetCity}_行程日历.ics`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(downloadUrl)
+  } catch (err) {
+    console.error('日历导出失败:', err)
+    alert(`日历导出失败: ${err.message || '网络连接超时'}`)
+  } finally {
+    isExportingCalendar.value = false
   }
 }
 
@@ -3985,6 +4065,175 @@ onMounted(async () => {
   border-color: #38bdf8;
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   📅 RFC 5545 iCalendar 日历导出操作栏
+   ══════════════════════════════════════════════════════════════ */
+.itinerary-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.itinerary-title-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.itinerary-city-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: 0.5px;
+}
+
+.itinerary-summary-count {
+  font-size: 12px;
+  color: #94a3b8;
+  background: rgba(30, 41, 59, 0.8);
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.btn-export-calendar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.35));
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  color: #6ee7b7;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+}
+
+.btn-export-calendar:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.35), rgba(5, 150, 105, 0.5));
+  border-color: #34d399;
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.45);
+  transform: translateY(-1px);
+}
+
+.btn-export-calendar:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-export-calendar .cal-icon {
+  font-size: 14px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ⚠️ 热门名胜实名预约时效与售罄预警 (Reservation Alert Guard)
+   ══════════════════════════════════════════════════════════════ */
+.reservation-alert-box {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  transition: all 0.2s ease;
+}
+
+.reservation-alert-box.critical {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(185, 28, 28, 0.06));
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-left: 4px solid #ef4444;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+}
+
+.reservation-alert-box.urgent {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(217, 119, 6, 0.06));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-left: 4px solid #f59e0b;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+}
+
+.reservation-alert-box.notice {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.1), rgba(14, 165, 233, 0.05));
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-left: 4px solid #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.12);
+}
+
+.alert-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.alert-badge-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+.reservation-alert-box.critical .alert-badge-pill {
+  background: #ef4444;
+  color: #fff;
+}
+
+.reservation-alert-box.urgent .alert-badge-pill {
+  background: #f59e0b;
+  color: #0f172a;
+}
+
+.reservation-alert-box.notice .alert-badge-pill {
+  background: #38bdf8;
+  color: #0f172a;
+}
+
+.alert-title {
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.alert-body .alert-detail {
+  margin: 0 0 8px 0;
+  color: #cbd5e1;
+  font-size: 11.5px;
+}
+
+.alert-meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meta-chip {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #94a3b8;
+}
+
+.meta-chip.backup {
+  background: rgba(244, 114, 182, 0.15);
+  border-color: rgba(244, 114, 182, 0.4);
+  color: #f472b6;
+  font-weight: 600;
+}
+
 
 /* ══════════════════════════════════════════════════════════════
    Pi 风格：Agent as Map Controller 空间探索动态地图
