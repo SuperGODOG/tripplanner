@@ -24,14 +24,23 @@ from ..memory.context_compactor import compact_conversation_history
 
 from ..services.geo_entity_resolver import resolve_destination, DestinationType
 
-# 常见热门目的地城市与旅游大区库
+# 中国各省级行政区（用于层级前缀识别与剥离，按字数降序）
+CHINESE_PROVINCES = [
+    "内蒙古", "黑龙江",
+    "四川", "云南", "贵州", "青海", "甘肃", "陕西", "吉林", "辽宁",
+    "河北", "山西", "山东", "河南", "湖北", "湖南", "江苏", "浙江", "安徽",
+    "江西", "福建", "广东", "海南", "台湾", "新疆", "西藏", "广西", "宁夏",
+]
+
+# 常见热门目的地城市与旅游大区库（按字符长度降序排列，优先长词匹配）
 COMMON_CITIES = [
+    "乌鲁木齐", "张家界", "香格里拉", "呼伦贝尔", "西双版纳", "九寨沟", "都江堰", "青城山", "四姑娘山",
     "北京", "上海", "广州", "深圳", "成都", "重庆", "杭州", "西安", "南京",
     "武汉", "苏州", "天津", "厦门", "三亚", "青岛", "长沙", "郑州", "大连",
     "昆明", "哈尔滨", "沈阳", "济南", "福州", "南宁", "贵阳", "兰州", "拉萨",
-    "银川", "西宁", "乌鲁木齐", "桂林", "洛阳", "黄山", "张家界", "九寨沟", "大理", "丽江",
-    "四川", "川西", "峨眉", "峨眉山", "乐山", "都江堰", "青城山", "云南", "贵州", "新疆",
-    "西藏", "青海", "甘肃", "海南", "康定", "稻城", "香格里拉", "敦煌",
+    "银川", "西宁", "桂林", "洛阳", "黄山", "大理", "丽江", "川西", "峨眉", "峨眉山",
+    "乐山", "康定", "稻城", "敦煌", "内江", "绵阳", "自贡", "宜宾", "泸州", "南充",
+    "达州", "广元", "遂宁", "资阳", "眉山", "雅安", "巴中", "攀枝花", "德阳",
 ]
 
 CN_NUM_MAP = {
@@ -91,12 +100,12 @@ def extract_slots_from_input(
         "华山": "渭南",
         "普陀山": "舟山",
         "武夷山": "南平",
-        "三星堆": "四川",
+        "三星堆": "德阳",
     }
 
     excluded_words = {
         "旅游", "出游", "玩耍", "度假", "散心", "散散", "散散心", "放松", "透气",
-        "转转", "逛逛", "看看", "走走", "玩", "地方", "哪里", "火星", "月球",
+        "转转", "逛逛", "看看", "走走", "玩", "地方", "哪里", "出去", "出门", "火星", "月球",
         "月亮", "太阳", "外太空", "太空", "银河系", "宇宙", "亚特兰蒂斯",
         "赛博朋克", "元宇宙", "天堂", "地狱", "地府", "霍格沃茨", "潘多拉", "虚无之地"
     }
@@ -104,8 +113,9 @@ def extract_slots_from_input(
     extracted_city = None
     matched_landmarks = []
 
+    # 动词引导意图匹配：断言后面为行程时长（如1天/3日游）或标点/句末/动作助词，杜绝“九寨沟/三亚/四姑娘山”因含中文数字被提前截断
     steer_match = re.search(
-        r"(?:改成|改去|改为|换成|换去|换到|转去|转战|又改|改|变更为|还是去|要不去|要不|想去|打算去|去|到|目的地[是为]?)\s*([\u4e00-\u9fa5]{2,6}?)(?:市|区|省)?(?=[0-9一二两三四五六七八九十]|天|日|玩|吧|呢|呀|呗|啊|\s|$|[，。！？,\.!?])",
+        r"(?:改成|改去|改为|换成|换去|换到|转去|转战|又改|改|变更为|还是去|要不去|要不|想去|打算去|去|到|目的地[是为]?)\s*([\u4e00-\u9fa5]{2,10}?)(?:市|区|省)?(?=(?:[0-9一二两三四五六七八九十]+)\s*(?:天|日|晚|周)|[，。！？,\.!?\s]|$|玩|呆|待|走|度|吧|呢|呀|呗|啊)",
         text
     )
     if steer_match:
@@ -113,12 +123,36 @@ def extract_slots_from_input(
         for suffix in ("旅游", "旅行", "出游", "度假", "玩耍"):
             if cand.endswith(suffix) and len(cand) > len(suffix):
                 cand = cand[:-len(suffix)]
-        if cand and cand not in excluded_words and len(cand) in (2, 3, 4, 5, 6):
+        if cand and cand not in excluded_words and len(cand) in range(2, 11):
+            # 1. 省级前缀层级剥离：若用户输入为形如「四川内江」、「四川成都锦里」，下级空间才是真实目标城市
+            for prov in CHINESE_PROVINCES:
+                if cand.startswith(prov) and len(cand) > len(prov):
+                    sub_cand = cand[len(prov):].replace("省", "").replace("市", "").strip()
+                    if len(sub_cand) >= 2:
+                        cand = sub_cand
+                        break
+
+            # 2. 地标/景区精确匹配
+            for lm, mapped_city in FAMOUS_LANDMARK_CITY_MAP.items():
+                if cand == lm:
+                    cand = mapped_city
+                    matched_landmarks.append(lm)
+                    break
+
+            # 3. 城市 + 细分景点剥离 (如 北京故宫 -> 北京 + 故宫, 成都锦里 -> 成都 + 锦里)
             for c_name in COMMON_CITIES:
                 if cand.startswith(c_name) and len(cand) > len(c_name):
                     matched_landmarks.append(cand[len(c_name):])
                     cand = c_name
                     break
+
+            # 4. 若 cand 本身包含名胜地标
+            for lm, mapped_city in FAMOUS_LANDMARK_CITY_MAP.items():
+                if lm in cand:
+                    matched_landmarks.append(lm)
+                    if cand == lm:
+                        cand = mapped_city
+
             extracted_city = cand
 
     # B. 匹配知名名胜与线路大区映射
@@ -129,12 +163,17 @@ def extract_slots_from_input(
                 if not extracted_city:
                     extracted_city = mapped_city
 
-    # C. 匹配标准热门城市词表
+    # C. 匹配标准热门城市词表 (先地市/大区后省份，保证颗粒度更精准)
     if not extracted_city:
         for city in COMMON_CITIES:
             if city in text:
                 extracted_city = city
                 break
+        if not extracted_city:
+            for prov in CHINESE_PROVINCES:
+                if prov in text:
+                    extracted_city = prov
+                    break
 
     # D. 兜底正则
     if not extracted_city:
@@ -160,7 +199,7 @@ def extract_slots_from_input(
 
     # 提取到的名胜直接注入锁定项
     for lm in matched_landmarks:
-        if lm not in req.locked_items:
+        if lm != canonical_city and lm not in req.locked_items:
             req.locked_items.append(lm)
 
     # 2. 天数抽取 (匹配 "玩2天", "3天", "3天左右", 排除形如 "8月24日" 的日历日期，支持 0天 / 负数天拦截)

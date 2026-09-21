@@ -97,6 +97,40 @@ def test_conversational_steering_slot_extraction_sequence():
     assert "南疆" in str(req_5.get_slot_value("city"))
 
 
+def test_province_prefixed_destination_extraction_hierarchy():
+    """验证省级空间前缀与下级城市/景区的层级解耦识别 (如 四川内江 -> 内江, 四川九寨沟 -> 九寨沟)"""
+    # 1. 省份 + 地级市：真实目标应精准锚定到地级市，而非全省
+    req_neijiang = extract_slots_from_input("想去四川内江玩1天")
+    assert req_neijiang.get_slot_value("city") == "内江"
+    assert req_neijiang.get_slot_value("days") == 1
+    assert "内江" not in (req_neijiang.locked_items or [])
+
+    # 2. 省份+市级带行政区划后缀 (四川省内江市)
+    req_neijiang_full = extract_slots_from_input("想去四川省内江市玩1天")
+    assert req_neijiang_full.get_slot_value("city") == "内江"
+    assert req_neijiang_full.get_slot_value("days") == 1
+
+    # 3. 含有中文数字的著名景区/地市 (避免被正则前瞻将中文数字截断)
+    req_jiuzhai = extract_slots_from_input("想去四川九寨沟玩3天")
+    assert req_jiuzhai.get_slot_value("city") == "九寨沟"
+    assert req_jiuzhai.get_slot_value("days") == 3
+
+    req_sanya = extract_slots_from_input("想去海南三亚玩3天")
+    assert req_sanya.get_slot_value("city") == "三亚"
+    assert req_sanya.get_slot_value("days") == 3
+
+    # 4. 省份 + 城市 + 景点三级复合结构
+    req_jinli = extract_slots_from_input("想去四川成都锦里玩1天")
+    assert req_jinli.get_slot_value("city") == "成都"
+    assert req_jinli.get_slot_value("days") == 1
+    assert "锦里" in (req_jinli.locked_items or [])
+
+    # 5. 纯省份输入（无具体城市）：依然正常保留全省层级
+    req_sichuan = extract_slots_from_input("我想去四川玩3天")
+    assert "四川" in str(req_sichuan.get_slot_value("city"))
+    assert req_sichuan.get_slot_value("days") == 3
+
+
 # ================================================================
 # 3. 跨城市意图污染自愈清除 (Cross-City Lock Eviction)
 # ================================================================
