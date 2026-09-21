@@ -418,11 +418,129 @@ pie title 169 项自动化测试分布 (100% 全绿，2.70s 极速跑通)
 
 ---
 
+---
+
+## 🧮 专题深剖：K-Means 跨天互斥的集合论数学证明与防穿透工程规范
+
+### 1. 为什么传统 LLM 规划必然出现“跨天鬼影与瞬移”？
+在传统 Agent 框架中，行程由 LLM 端到端生成：
+```
+Prompt: "请为用户规划北京 3 天行程，每天安排 3 个景点..."
+➔ LLM 自回归采样 Token (Autoregressive Generation)
+```
+- **注意力稀释**：生成完前两天（约 1500 tokens）后，由于上下文注意力窗口的软衰减，模型对“前文已安排天坛”的记忆显著模糊；
+- **缺乏数据约束表**：神经网络无关系型数据库的唯一索引（Unique Constraint）硬校验机制；
+- **高频词先验概率偏置**：在“北京旅游”语料中，故宫、天坛、颐和园词频极大，导致 Day 1 上午写了天坛，Day 3 下午遇到“去哪散步”时天坛的 Logits 依然极高，从而不可避免地产生**跨天瞬移与鬼影重复**。
+
+### 2. K-Means 跨天零重复的集合论形式化证明 (Formal Mathematical Proof)
+
+#### 设定义域：
+设经高德原生连接池与名胜底座召回的有效市区 POI 集合为 $S$：
+$$S = \{p_1, p_2, \dots, p_n\}, \quad p_i = (\text{lng}_i, \text{lat}_i, \text{name}_i)$$
+设用户计划游玩天数为 $k \in \mathbb{N}^+$。
+
+#### 映射与划分定义：
+在 [`backend/app/services/clustering.py`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/services/clustering.py)（第 86~92 行）中，K-Means 聚类过程定义了一个从 POI 集合 $S$ 到天数簇索引集合 $\{0, 1, \dots, k-1\}$ 的**确定性单值分配函数（Single-Valued Assignment Function）**：
+$$f: S \to \{0, 1, \dots, k-1\}$$
+$$f(p_i) = \arg\min_{c \in \{0, \dots, k-1\}} \mathcal{D}(p_i, \mu_c)$$
+其中 $\mathcal{D}(p_i, \mu_c)$ 为球面 Haversine 地理距离，$\mu_c$ 为第 $c$ 天的几何质心。
+
+对于任意一天 $c \in \{0, \dots, k-1\}$，其分配的景点簇 $C_c$ 定义为该值在映射 $f$ 下的**原像（Preimage）**：
+$$C_c = f^{-1}(c) = \{p_i \in S \mid f(p_i) = c\}$$
+
+#### 互斥性定理证明 (Theorem: Mutual Exclusivity)：
+**命题**：对于任意不同的游玩日 $a \neq b$（$a, b \in \{0, \dots, k-1\}$），其对应的景点簇必无交集：
+$$C_a \cap C_b = \emptyset$$
+
+**反证法（Proof by Contradiction）**：
+1. 假设存在某个景点 $p^* \in C_a \cap C_b$；
+2. 由 $p^* \in C_a$ 可得：$f(p^*) = a$；
+3. 由 $p^* \in C_b$ 可得：$f(p^*) = b$；
+4. 因此：$a = f(p^*) = b \implies a = b$；
+5. 这与前提条件 $a \neq b$ 产生**直接矛盾（Contradiction）**。
+6. 因此假设不成立，$C_a \cap C_b = \emptyset$ 恒成立。**证毕（Q.E.D.）**。
+
+$$\bigcup_{c=0}^{k-1} C_c = S, \quad \text{且} \quad \forall a \neq b, \; C_a \cap C_b = \emptyset$$
+集合族 $\{C_0, C_1, \dots, C_{k-1}\}$ 构成了原景点全集 $S$ 的**严格数学划分（Strict Mathematical Partition）**。
+
+### 3. 工程防穿透守门三防线
+数学证明成立的前提是**输入集合 $S$ 本身无重名别名**。TripPlanner 构建了 3 道工程防线：
+1. **上游候选去重守门**（[`poi_synthesizer.py:80-92`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/services/poi_synthesizer.py#L80-L92)）：经纬度网格哈希 + 别名字典归一化，通过 `seen = set()` 彻底拦截重名 POI 混入；
+2. **容量均衡算法守恒**（[`clustering.py:101-122`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/services/clustering.py#L101-L122)）：Balanced K-Means 的极差平衡仅通过修改 `assign[best_idx] = dst_c` 转移元素，绝非复制；
+3. **周一闭馆自愈对调**（[`nodes.py:180-210`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/graph/nodes.py#L180-L210)）：采用严格双射交换（Bijection Swap），两日景点并集与交集守恒。
+
+---
+
+## 🚀 专题演进：Pi-Style 自主旅行探索 Harness 架构与动态地图操作契约
+
+参考 **Pi Agent 哲学（Minimal Mechanism, Maximum Autonomy）**，TripPlanner 演进为支持动态地理探索、地图双工操作与多维记忆的自主智能体系统。原型已固化于 [`backend/app/harness/exploration_spike.py`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/harness/exploration_spike.py)。
+
+```mermaid
+flowchart TB
+    classDef client fill:#080d1a,stroke:#00F0FF,stroke-width:2px,color:#00F0FF;
+    classDef harness fill:#05141c,stroke:#00FF66,stroke-width:2px,color:#00FF66;
+    classDef tools fill:#1c150b,stroke:#FFB800,stroke-width:2px,color:#FFB800;
+    classDef memory fill:#140c24,stroke:#BD00FF,stroke-width:2px,color:#BD00FF;
+    classDef map fill:#1f0b18,stroke:#FF0055,stroke-width:2px,color:#FF0055;
+
+    subgraph GUI_SURFACE["✦ 解耦化 GUI 客户端 (Decoupled Reactive Surface)"]
+        CHAT["流式对话与推理视界 (Chat & Thinking Console)"]:::client
+        MAP_CANVAS["动态矢量地图视界 (Interactive MapLibre / Leaflet Canvas)"]:::map
+        DRAWER["多维需求与记忆抽屉 (Memory & Slots Panel)"]:::client
+    end
+
+    subgraph PI_HARNESS["✦ Pi 风格 Sovereign Harness 主脑 (Headless Agent Engine)"]
+        LOOP["Single Async Generator Loop (Pi 主循环)<br/>run(session_id, user_message, context)"]:::harness
+        
+        subgraph PROTOCOL["一等公民动作协议 (First-Class Protocols)"]
+            EVT_THINK["ThinkingEvent (推理轨迹)"]:::harness
+            EVT_MAP["MapActionEvent (动态地图指令)"]:::map
+            EVT_PLAN["PlanDeltaEvent (局部增量更新)"]:::harness
+        end
+
+        LOOP --> EVT_THINK & EVT_MAP & EVT_PLAN
+    end
+
+    subgraph TOOL_MATRIX["✦ 确定性与探索型工具注册矩阵 (Tool Registry)"]
+        T_DISCOVER["discover_nearby_gems<br/>(基于当前地图视野动态探索小众宝藏点)"]:::tools
+        T_GEO_ROUTE["solve_2opt_route<br/>(局部/全局路径优化算法)"]:::tools
+        T_KMEANS["cluster_days_kmeans<br/>(空间地理平衡聚类)"]:::tools
+        T_TRANSIT["query_transit_cost<br/>(公交/打车真实耗时估算)"]:::tools
+        T_RAG["fetch_live_intel<br/>(Tavily 实时票务时效与现场避坑)"]:::tools
+    end
+
+    subgraph MEMORY_SYSTEM["✦ 多维自适应记忆中枢 (Adaptive Memory Matrix)"]
+        M_TRANSIENT["Transient Session Slots<br/>(本次行程天数、预算、特定同行人)"]:::memory
+        M_PERSONA["Long-Term User Persona<br/>(饮食禁忌、节奏偏好、消费水平)"]:::memory
+        M_FOOTPRINT["Episodic Travel Footprint<br/>(历史足迹库：去过的城市/打卡过的景点避免跨年推荐)"]:::memory
+    end
+
+    GUI_SURFACE <==>|"SSE / WebSocket 双向管道"| PI_HARNESS
+    LOOP <--> TOOL_MATRIX
+    LOOP <--> MEMORY_SYSTEM
+    EVT_MAP ==>|"GeoJSON / Viewport 指令"| MAP_CANVAS
+```
+
+### 1. 动态地图调用协议 (Map Action Protocol)
+地图是 Agent 的**外部空间交互沙箱**，Harness 通过一等公民事件 `MapActionEvent` 发射指令：
+- `FOCUS_VIEWPORT`：视口平滑飞越（`flyTo`）至目标商圈或城市中心；
+- `DRAW_ROUTE`：动态渲染 2-Opt 游览动线 GeoJSON 折线与流光粒子；
+- `HIGHLIGHT_POI`：伴随讲解，对应地图 Pin 弹出高亮卡片；
+- `CLUSTER_OVERLAY`：在底图上叠加当日 K-Means 空间多边形凸包（Convex Hull）。
+
+### 2. 多维自适应记忆矩阵 (Multi-Tier Memory)
+- **Tier 1: 瞬时行程需求 (Transient)**：单次会话有效，随行程结束归档；
+- **Tier 2: 长期用户画像 (Persona)**：饮食禁忌、消费习惯与游玩节奏偏好，跨会话永久生效；
+- **Tier 3: 历史足迹图谱 (Footprint)**：记录用户过去游览过的景点，**实现跨次/跨年旅行去重**，重游同城时自动避开已游览核心点，推荐深度小众探索。
+
+---
+
 ## 📂 关键文件架构映射索引 (File Manifest)
 
 | 文件路径 | 架构层级 | 核心职责 |
 | :--- | :---: | :--- |
 | [`backend/app/harness/agent_loop.py`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/harness/agent_loop.py) | **Core** | **Sovereign Harness 极速主循环**：意图提炼、4ms 澄清、并发工具调用、不变式裁决与 RAG 富化 |
+| [`backend/app/harness/exploration_spike.py`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/harness/exploration_spike.py) | **Core** | **Pi 风格自主探索原型**：演示动态地图动作发射、历史足迹去重与 K-Means 形式化断言 |
 | [`backend/app/harness/events.py`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/harness/events.py) | **Core** | **强类型事件体系**：23 类结构化生命周期事件，天然直通前端 SSE 流式渲染 |
 | [`backend/app/harness/session_store.py`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/harness/session_store.py) | **Core** | **轻量级会话存储**：线程安全、原子更新的三轨快照，毫秒级读取，0 外部依赖 |
 | [`backend/app/harness/invariants.py`](file:///Users/caoruixin/Desktop/project/tripplanner/backend/app/harness/invariants.py) | **Core** | **领域不变式裁决器**：周一闭馆冲突拦截、预算严重赤字审计、三餐完整性校验 |
