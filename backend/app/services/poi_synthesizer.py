@@ -195,7 +195,13 @@ def synthesize_city_pois(
                 "district": clean_city,
             })
 
-    # 6. 写入指纹缓存 (7 天 TTL)
+    # 6. 统一补全高清美学实景图片 URL (高德/维基美学图库透传)
+    from .poi_images import resolve_poi_image
+    for p in candidate_pool:
+        if not p.get("image_url"):
+            p["image_url"] = resolve_poi_image(p.get("name", ""), category=p.get("category", ""))
+
+    # 7. 写入指纹缓存 (7 天 TTL)
     try:
         cache_mgr.set("synthesize_pois", f"{clean_city}_{fp}", candidate_pool, ttl=604800)
     except Exception as e:

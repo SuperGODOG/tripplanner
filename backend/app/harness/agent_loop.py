@@ -202,10 +202,15 @@ class TravelAgentHarness:
                 p_price = getattr(c, "price", 0.0) or (c.get("price", 0.0) if isinstance(c, dict) else 0.0)
                 p_rating = getattr(c, "rating", None) or (c.get("rating") if isinstance(c, dict) else None)
 
+                p_image = getattr(c, "image_url", "") or (c.get("image_url", "") if isinstance(c, dict) else "")
+                if not p_image and p_name:
+                    from ..services.poi_images import resolve_poi_image
+                    p_image = resolve_poi_image(p_name, category=p_cat)
+
                 candidate_pool.append({
                     "name": p_name, "lng": float(p_lng), "lat": float(p_lat),
                     "category": p_cat, "typecode": p_tcode, "price": float(p_price or 0.0),
-                    "rating": p_rating, "visit_minutes": 120,
+                    "rating": p_rating, "visit_minutes": 120, "image_url": p_image,
                 })
 
             if not candidate_pool:
@@ -217,6 +222,7 @@ class TravelAgentHarness:
                 if not exact_match:
                     sub_match = next((p for p in candidate_pool if p["name"].startswith(f"{lk}-") or p["name"].startswith(f"{lk}(")), None)
                     if sub_match:
+                        from ..services.poi_images import resolve_poi_image
                         candidate_pool.insert(0, {
                             "name": lk,
                             "lng": sub_match["lng"],
@@ -226,6 +232,7 @@ class TravelAgentHarness:
                             "price": sub_match.get("price") or 60.0,
                             "rating": 4.9,
                             "visit_minutes": 180,
+                            "image_url": sub_match.get("image_url") or resolve_poi_image(lk),
                         })
 
             # ── 用户历史足迹感知与已游览名胜自愈过滤 (Footprint Filtering) ──
@@ -397,8 +404,15 @@ class TravelAgentHarness:
                             orig["lng"] = inner_poi["lng"]
                         if "lat" not in orig and "lat" in inner_poi:
                             orig["lat"] = inner_poi["lat"]
+                        if not orig.get("image_url"):
+                            from ..services.poi_images import resolve_poi_image
+                            orig["image_url"] = resolve_poi_image(orig["name"], category=orig.get("category", ""))
                         ordered_attrs.append(orig)
                 else:
+                    from ..services.poi_images import resolve_poi_image
+                    for p_attr in day_pois:
+                        if not p_attr.get("image_url"):
+                            p_attr["image_url"] = resolve_poi_image(p_attr.get("name", ""), category=p_attr.get("category", ""))
                     ordered_attrs = day_pois
 
                 # ── 热门地标预约时效与售罄预警评估 (Reservation Policy Guard) ──

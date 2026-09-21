@@ -32,6 +32,7 @@ class PoiCandidate(BaseModel):
     level: str = ""             # 景区等级 (如 "AAAAA")
     tel: str = ""               # 官方联系电话
     recommended_reason: str = ""       # 招牌菜品或特色理由
+    image_url: str = ""         # 高清实景封面图 (高德官方实景 / 维基美学公版图)
     source: str = "amap"        # 数据来源
     id: str = Field(default="", description="稳定 ID，构造时自动生成")
 

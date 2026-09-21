@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from hello_agents.tools import Tool, ToolParameter
 from ..services.amap_service import get_amap_mcp_tool, run_mcp, geo_cached
+from ..services.poi_images import resolve_poi_image
 from ..models.candidates import PoiCandidate, HotelCandidate
 
 
@@ -143,6 +144,8 @@ class AmapToolWrapper(Tool):
         business_area = str(b_area or "")
         level = str(poi.get("level") or "")
         tel = str(poi.get("tel") or "")
+        photos = poi.get("photos", [])
+        image_url = resolve_poi_image(name, photos=photos, category=cat)
 
         common: dict[str, Any] = dict(
             name=name, lng=float(lng), lat=float(lat),
@@ -155,6 +158,7 @@ class AmapToolWrapper(Tool):
             business_area=business_area,
             level=level,
             tel=tel,
+            image_url=image_url,
         )
         if cls is HotelCandidate:
             htype = str(poi.get("type", "") or "").split(";")[-1]

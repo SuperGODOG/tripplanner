@@ -356,12 +356,12 @@
 
             <div v-if="currentPlan && currentPlan.days && currentPlan.days.length" class="itinerary-days">
               <div
-                v-for="day in currentPlan.days"
-                :key="day.day_index"
+                v-for="(day, dayIdx) in currentPlan.days"
+                :key="day.day_index !== undefined ? day.day_index : dayIdx"
                 class="day-card"
               >
                 <div class="day-card-header">
-                  <div class="day-badge">Day {{ day.day_index + 1 }}</div>
+                  <div class="day-badge">Day {{ (day.day_index !== undefined ? day.day_index : dayIdx) + 1 }}</div>
                   <div class="day-date">{{ day.date || '' }}</div>
                   <div class="day-meta">
                     门票 ¥{{ day.total_ticket || 0 }} · 游览 {{ (day.attractions || []).length }} 景点
@@ -372,6 +372,17 @@
                       🚶 徒步 {{ day.telemetry.total_distance_km }}km (限 {{ day.telemetry.walking_limit_km }}km)
                     </span>
                   </div>
+                  <!-- 2-Opt 智能顺路自愈按钮 -->
+                  <button
+                    v-if="(day.attractions || []).length >= 3"
+                    class="btn-day-2opt"
+                    :disabled="isMutatingItinerary && mutatingDayIndex === (day.day_index !== undefined ? day.day_index : dayIdx)"
+                    @click="mutateItinerary('2opt', day.day_index !== undefined ? day.day_index : dayIdx)"
+                    title="基于 2-Opt TSP 空间局部搜索对当日游览路径进行空间自愈，消除折返与绕路"
+                  >
+                    <span v-if="isMutatingItinerary && mutatingDayIndex === (day.day_index !== undefined ? day.day_index : dayIdx)" class="loading-spin-xs"></span>
+                    <span v-else>⚡ 2-Opt 智能顺路</span>
+                  </button>
                 </div>
 
                 <!-- 高德官方气象与出行提示 -->
@@ -394,90 +405,106 @@
                   <span class="pacing-text">{{ day.telemetry.pacing_hint }}</span>
                 </div>
 
-                <!-- 景点列表 (2-Opt 最优时序) -->
-                <div class="attractions-timeline">
+                <!-- 景点列表 (2-Opt 最优时序与画板拖拽) -->
+                <div class="attractions-timeline" :data-day-index="day.day_index !== undefined ? day.day_index : dayIdx">
                   <div
                     v-for="(attr, aIdx) in day.attractions"
-                    :key="aIdx"
+                    :key="attr.name || aIdx"
                     class="timeline-item"
+                    :data-poi-name="attr.name"
                   >
                     <div class="timeline-dot"></div>
                     <div :class="['attraction-card', isPoiVisited(attr.name) ? 'visited-card' : '']">
-                      <div class="attr-header">
-                        <div class="attr-name-wrap">
-                          <span class="attr-name">{{ attr.name }}</span>
-                          <span v-if="isItemLocked(attr.name)" class="lock-indicator" title="用户锁定项">🔒 锁定</span>
-                          <span v-if="isPoiVisited(attr.name)" class="visited-indicator" title="已录入您的历史足迹库">👣 已打卡</span>
+                      <div class="attr-card-body-row">
+                        <!-- 拖拽手柄 -->
+                        <div class="drag-handle" title="按住拖拽以调序或跨天移动">
+                          <span>⋮⋮</span>
                         </div>
-                        <div class="attr-badges">
-                          <!-- 高德官方真实评分 -->
-                          <span v-if="attr.rating" class="amap-score-badge" title="高德官方权威真实评分">
-                            ⭐ {{ attr.rating }}
-                          </span>
-                          <!-- 国家级景区等级 -->
-                          <span v-if="attr.level" class="amap-level-badge" title="国家景区评级">
-                            🏷️ {{ attr.level }}
-                          </span>
-                          <!-- 营业核验 Badge -->
-                          <span
-                            v-if="attr.place_fact"
-                            :class="['fact-badge', getFactClass(attr.place_fact)]"
-                          >
-                            {{ getFactLabel(attr.place_fact) }}
-                          </span>
-                          <span class="ticket-tag">¥{{ attr.price || attr.ticket_price || 0 }}</span>
-                          <!-- 💎 在地秘境 Badge -->
-                          <span
-                            v-if="attr.is_hidden_gem || attr.category === '在地秘境'"
-                            class="gem-badge"
-                            title="在地秘境：避开人潮的本地高美学私藏"
-                          >
-                            💎 在地秘境
-                          </span>
-                          <!-- 🧭 在空间地图中定位 -->
-                          <button
-                            class="btn-locate-map"
-                            @click.stop="focusPoiOnMap(attr)"
-                            title="在空间探索地图中定位此地"
-                          >
-                            🧭 空间定位
-                          </button>
-                          <!-- 👣 游览打卡/足迹标记按钮 -->
-                          <button
-                            :class="['btn-footprint-tag', isPoiVisited(attr.name) ? 'is-visited' : '']"
-                            :title="isPoiVisited(attr.name) ? '点击取消打卡' : '标记已去过，下次规划该城市将自动避开'"
-                            @click.stop="toggleFootprint(attr.name, currentPlan?.city || getSlotValue('city') || '北京')"
-                          >
-                            {{ isPoiVisited(attr.name) ? '✓ 已打卡' : '👣 去过?' }}
-                          </button>
+
+                        <!-- 高清实景封面缩略图 -->
+                        <div v-if="attr.image_url" class="attr-hero-thumb-wrapper">
+                          <img :src="attr.image_url" :alt="attr.name" class="attr-hero-thumb" loading="lazy" />
                         </div>
-                      </div>
 
-                      <div class="attr-meta">
-                        <span v-if="attr.arrive_time" class="meta-item time-tag">
-                          ⏰ 游览时序: {{ attr.arrive_time }} - {{ attr.depart_time }}
-                        </span>
-                        <span v-if="attr.distance_km" class="meta-item">
-                          🚗 距上站: {{ attr.distance_km }} km
-                        </span>
-                        <span class="meta-item">⏱ 建议时长: {{ attr.visit_minutes || 90 }} 分钟</span>
-                        <span v-if="attr.open_time || (attr.place_fact && attr.place_fact.opening_hours)" class="meta-item time-open">
-                          🕒 营业: {{ attr.open_time || attr.place_fact.opening_hours }}
-                        </span>
-                        <span v-if="attr.business_area" class="meta-item area-tag">
-                          🏞️ {{ attr.business_area }}
-                        </span>
-                      </div>
+                        <!-- 详情内容区 -->
+                        <div class="attr-content-area">
+                          <div class="attr-header">
+                            <div class="attr-name-wrap">
+                              <span class="attr-name">{{ attr.name }}</span>
+                              <span v-if="isItemLocked(attr.name)" class="lock-indicator" title="用户锁定项">🔒 锁定</span>
+                              <span v-if="isPoiVisited(attr.name)" class="visited-indicator" title="已录入您的历史足迹库">👣 已打卡</span>
+                            </div>
+                            <div class="attr-badges">
+                              <!-- 高德官方真实评分 -->
+                              <span v-if="attr.rating" class="amap-score-badge" title="高德官方权威真实评分">
+                                ⭐ {{ attr.rating }}
+                              </span>
+                              <!-- 国家级景区等级 -->
+                              <span v-if="attr.level" class="amap-level-badge" title="国家景区评级">
+                                🏷️ {{ attr.level }}
+                              </span>
+                              <!-- 营业核验 Badge -->
+                              <span
+                                v-if="attr.place_fact"
+                                :class="['fact-badge', getFactClass(attr.place_fact)]"
+                              >
+                                {{ getFactLabel(attr.place_fact) }}
+                              </span>
+                              <span class="ticket-tag">¥{{ attr.price || attr.ticket_price || 0 }}</span>
+                              <!-- 💎 在地秘境 Badge -->
+                              <span
+                                v-if="attr.is_hidden_gem || attr.category === '在地秘境'"
+                                class="gem-badge"
+                                title="在地秘境：避开人潮的本地高美学私藏"
+                              >
+                                💎 在地秘境
+                              </span>
+                              <!-- 🧭 在空间地图中定位 -->
+                              <button
+                                class="btn-locate-map"
+                                @click.stop="focusPoiOnMap(attr)"
+                                title="在空间探索地图中定位此地"
+                              >
+                                🧭 空间定位
+                              </button>
+                              <!-- 👣 游览打卡/足迹标记按钮 -->
+                              <button
+                                :class="['btn-footprint-tag', isPoiVisited(attr.name) ? 'is-visited' : '']"
+                                :title="isPoiVisited(attr.name) ? '点击取消打卡' : '标记已去过，下次规划该城市将自动避开'"
+                                @click.stop="toggleFootprint(attr.name, currentPlan?.city || getSlotValue('city') || '北京')"
+                              >
+                                {{ isPoiVisited(attr.name) ? '✓ 已打卡' : '👣 去过?' }}
+                              </button>
+                            </div>
+                          </div>
 
-                      <!-- 💎 秘境推荐理由 -->
-                      <div v-if="attr.reason" class="attr-gem-reason">
-                        ✨ <strong>秘境特色</strong>：{{ attr.reason }}
-                      </div>
+                          <div class="attr-meta">
+                            <span v-if="attr.arrive_time" class="meta-item time-tag">
+                              ⏰ 游览时序: {{ attr.arrive_time }} - {{ attr.depart_time }}
+                            </span>
+                            <span v-if="attr.distance_km" class="meta-item">
+                              🚗 距上站: {{ attr.distance_km }} km
+                            </span>
+                            <span class="meta-item">⏱ 建议时长: {{ attr.visit_minutes || 90 }} 分钟</span>
+                            <span v-if="attr.open_time || (attr.place_fact && attr.place_fact.opening_hours)" class="meta-item time-open">
+                              🕒 营业: {{ attr.open_time || attr.place_fact.opening_hours }}
+                            </span>
+                            <span v-if="attr.business_area" class="meta-item area-tag">
+                              🏞️ {{ attr.business_area }}
+                            </span>
+                          </div>
 
-                      <!-- 📍 详细门牌地址 -->
-                      <div v-if="attr.address" class="attr-address-line">
-                        <span class="addr-icon">📍</span>
-                        <span class="addr-text">{{ attr.address }}</span>
+                          <!-- 💎 秘境推荐理由 -->
+                          <div v-if="attr.reason" class="attr-gem-reason">
+                            ✨ <strong>秘境特色</strong>：{{ attr.reason }}
+                          </div>
+
+                          <!-- 📍 详细门牌地址 -->
+                          <div v-if="attr.address" class="attr-address-line">
+                            <span class="addr-icon">📍</span>
+                            <span class="addr-text">{{ attr.address }}</span>
+                          </div>
+                        </div>
                       </div>
 
                       <!-- ⚠️ 热门名胜实名预约时效与售罄预警 (Reservation Policy Guard) -->
@@ -1020,7 +1047,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import Sortable from 'sortablejs'
 
 // ── 多租户身份与会话状态定义 ──
 const userId = ref(localStorage.getItem('tp_user_id') || 'demo_traveler')
@@ -1214,6 +1242,98 @@ async function exportCalendarICS() {
     alert(`日历导出失败: ${err.message || '网络连接超时'}`)
   } finally {
     isExportingCalendar.value = false
+  }
+}
+
+// ── 双向画板拖拽突变与 2-Opt 局域自愈 (Canvas Human-in-the-Loop) ──
+const isMutatingItinerary = ref(false)
+const mutatingDayIndex = ref(null)
+let sortableInstances = []
+
+function initSortable() {
+  sortableInstances.forEach(s => {
+    try { s.destroy() } catch (e) {}
+  })
+  sortableInstances = []
+
+  const timelineEls = document.querySelectorAll('.attractions-timeline')
+  if (!timelineEls.length) return
+
+  timelineEls.forEach((el) => {
+    const sortable = new Sortable(el, {
+      group: 'itinerary-canvas-days',
+      animation: 200,
+      handle: '.drag-handle',
+      ghostClass: 'sortable-ghost',
+      chosenClass: 'sortable-chosen',
+      onEnd: async (evt) => {
+        const fromDayIdx = parseInt(evt.from.dataset.dayIndex, 10)
+        const toDayIdx = parseInt(evt.to.dataset.dayIndex, 10)
+        const oldIndex = evt.oldIndex
+        const newIndex = evt.newIndex
+
+        if (isNaN(fromDayIdx) || isNaN(toDayIdx)) return
+        if (fromDayIdx === toDayIdx && oldIndex === newIndex) return
+        if (!currentPlan.value || !currentPlan.value.days) return
+
+        const sourceDay = currentPlan.value.days.find(d => (d.day_index !== undefined ? d.day_index : 0) === fromDayIdx)
+        const targetDay = currentPlan.value.days.find(d => (d.day_index !== undefined ? d.day_index : 0) === toDayIdx)
+
+        if (!sourceDay || !targetDay) return
+
+        const [movedAttr] = sourceDay.attractions.splice(oldIndex, 1)
+        targetDay.attractions.splice(newIndex, 0, movedAttr)
+
+        await mutateItinerary('recalc')
+      }
+    })
+    sortableInstances.push(sortable)
+  })
+}
+
+async function mutateItinerary(mode = 'recalc', targetDayIdx = null) {
+  if (!currentPlan.value || !currentPlan.value.days) return
+  isMutatingItinerary.value = true
+  if (targetDayIdx !== null) {
+    mutatingDayIndex.value = targetDayIdx
+  }
+
+  try {
+    const payload = {
+      session_id: sessionId.value,
+      user_id: userId.value,
+      days: currentPlan.value.days,
+      mode: mode,
+      target_day_index: targetDayIdx,
+      planning_date: currentPlan.value.start_date || getSlotValue('start_date') || '',
+    }
+
+    const res = await fetch('/api/session/mutate_itinerary', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Id': userId.value,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!res.ok) {
+      console.warn('行程画板突变自愈异常', res.statusText)
+      return
+    }
+
+    const data = await res.json()
+    if (data.status === 'success' && data.updated_plan) {
+      currentPlan.value = data.updated_plan
+      saveSessionCache()
+    }
+  } catch (err) {
+    console.error('行程拖拽突变保存失败:', err)
+  } finally {
+    isMutatingItinerary.value = false
+    mutatingDayIndex.value = null
+    await nextTick()
+    initSortable()
   }
 }
 
@@ -2091,6 +2211,25 @@ onMounted(async () => {
 
   // 3. 异步服务端状态同步与断点核验
   await fetchSessionState()
+
+  // 4. 监听行程数据变更，实时挂载/更新 Sortable 拖拽双向画板
+  watch(
+    () => currentPlan.value,
+    (newVal) => {
+      if (newVal && newVal.days) {
+        nextTick(() => initSortable())
+      }
+    },
+    { deep: false }
+  )
+  watch(
+    () => activeRightTab.value,
+    (tab) => {
+      if (tab === 'board' && currentPlan.value?.days) {
+        nextTick(() => initSortable())
+      }
+    }
+  )
 })
 </script>
 
@@ -2798,6 +2937,100 @@ onMounted(async () => {
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 8px;
   padding: 10px 12px;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.attr-card-body-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.drag-handle {
+  cursor: grab;
+  color: #64748b;
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: -2px;
+  padding: 4px 2px;
+  user-select: none;
+  transition: color 0.15s ease, transform 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.drag-handle:hover {
+  color: #38bdf8;
+  transform: scale(1.15);
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.attr-hero-thumb-wrapper {
+  flex-shrink: 0;
+  width: 80px;
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.attr-hero-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.3s ease;
+}
+.attr-hero-thumb:hover {
+  transform: scale(1.08);
+}
+.attr-content-area {
+  flex: 1;
+  min-width: 0;
+}
+.sortable-ghost {
+  opacity: 0.35;
+  background: rgba(56, 189, 248, 0.15) !important;
+  border: 1px dashed #38bdf8 !important;
+  border-radius: 8px;
+}
+.sortable-chosen {
+  background: rgba(30, 41, 59, 0.95) !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
+}
+.btn-day-2opt {
+  margin-left: 8px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.btn-day-2opt:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+}
+.btn-day-2opt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.loading-spin-xs {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(56, 189, 248, 0.3);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
 .attr-header {
   display: flex;

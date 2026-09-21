@@ -202,3 +202,47 @@ async def export_custom_calendar_ics(request: CalendarExportRequest):
         "Content-Type": "text/calendar; charset=utf-8",
     }
     return Response(content=ics_content, media_type="text/calendar", headers=headers)
+
+
+class MutateItineraryRequest(BaseModel):
+    session_id: str
+    user_id: str = "default_user"
+    days: list[dict[str, Any]]
+    mode: str = "recalc"  # "recalc" | "2opt"
+    target_day_index: int | None = None
+    planning_date: str = ""
+
+
+@router.post("/mutate_itinerary")
+async def mutate_session_itinerary(request: MutateItineraryRequest, x_user_id: str | None = Header(None)):
+    """画板交互突变端点: 接收前端拖拽调序，并执行局部 2-Opt TSP 自愈与动态属性时序重算"""
+    effective_user_id = x_user_id or request.user_id
+    try:
+        snapshot = harness_session_store.get(request.session_id, user_id=effective_user_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    base_plan = snapshot.current_plan or {}
+    from ..services.itinerary_mutator import mutate_itinerary_plan
+
+    updated_plan = mutate_itinerary_plan(
+        plan=base_plan,
+        mutated_days=request.days,
+        mode=request.mode,
+        target_day_index=request.target_day_index,
+        planning_date=request.planning_date,
+    )
+
+    # 原子更新会话存储中的行程版本
+    harness_session_store.update(
+        session_id=request.session_id,
+        user_id=effective_user_id,
+        current_plan=updated_plan,
+    )
+
+    return {
+        "status": "success",
+        "session_id": request.session_id,
+        "mode": request.mode,
+        "updated_plan": updated_plan,
+    }
