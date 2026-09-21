@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from datetime import datetime, date, timedelta
 from typing import Any
-from langgraph.types import interrupt
 from ..models.session import (
     EffectiveRequirements,
     RequirementSlot,
@@ -392,7 +391,8 @@ def clarification_node(state: dict[str, Any]) -> dict[str, Any]:
         if prompt is None:
             break
 
-        # 触发 LangGraph interrupt 挂起！等待外部恢复
+        # 触发 LangGraph interrupt 挂起（按需延迟导入，保证核心意图抽取模块零外部框架硬耦合）
+        from langgraph.types import interrupt
         resume_data = interrupt(prompt.model_dump())
 
         # 恢复后解析用户提供的值
