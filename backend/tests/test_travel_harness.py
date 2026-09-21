@@ -126,6 +126,7 @@ async def test_travel_harness_loop_stream():
     assert "thinking" in event_types
     assert "tool_start" in event_types
     assert "tool_end" in event_types
+    assert "map_action" in event_types
     assert "plan_version" in event_types
     assert "message_delta" in event_types
     assert "done" in event_types
@@ -137,3 +138,83 @@ async def test_travel_harness_loop_stream():
     assert plan["city"] == "成都"
     assert len(plan["days"]) == 1
     assert plan["days"][0]["hotel"]["name"] == "Minimax中心酒店"
+
+
+@pytest.mark.asyncio
+async def test_map_action_events_and_hidden_gems():
+    """测试 Pi 风格地图控制器指令流与在地秘境发现引擎"""
+    from app.tools.search_tools import discover_hidden_gems_tool
+    from app.harness.events import MapActionEvent
+
+    # 1. 验证在地秘境工具发现质量
+    gems_bj = discover_hidden_gems_tool(city="北京", center_coords=(116.407, 39.904), limit=2)
+    assert len(gems_bj) == 2
+    assert all(g.get("is_hidden_gem") is True for g in gems_bj)
+    assert any("东交民巷" in g["name"] or "人艺" in g["name"] for g in gems_bj)
+
+    # 2. 验证 Harness 循环完整发射 4 类地图控制动作
+    mock_reg = ToolRegistry()
+
+    @mock_reg.register("search_scenic_pois", "mock")
+    def _m1(city, preferences=None):
+        return [
+            {"name": f"{city}名胜1", "lng": 116.40, "lat": 39.90, "category": "文化古迹", "typecode": "110200", "price": 40},
+            {"name": f"{city}名胜2", "lng": 116.42, "lat": 39.92, "category": "文化古迹", "typecode": "110200", "price": 50},
+        ]
+
+    @mock_reg.register("discover_hidden_gems", "mock")
+    def _m_gem(city, center_coords=None, limit=2):
+        return discover_hidden_gems_tool(city=city, center_coords=center_coords, limit=limit)
+
+    @mock_reg.register("cluster_days_kmeans", "mock")
+    def _m2(pois, days):
+        return [{"day_index": 0, "pois": pois}]
+
+    @mock_reg.register("select_minimax_hotel", "mock")
+    def _m3(city, attraction_coords):
+        return {"hotel_selected": {"name": "王府井商圈酒店", "lng": 116.41, "lat": 39.91, "price": 420}}
+
+    @mock_reg.register("solve_2opt_route", "mock")
+    def _m4(pois):
+        class Res:
+            route = [{"name": p["name"], "arrive_time": "09:30", "depart_time": "11:30", "distance_km": 1.8, "poi": p} for p in pois]
+            total_ticket = 90.0
+        return Res()
+
+    @mock_reg.register("enrich_meals", "mock")
+    def _m5(plan_days, city, food_preferences=None):
+        return plan_days
+
+    @mock_reg.register("fetch_tavily_notes", "mock")
+    def _m6(city, poi_name):
+        return {"booking_policy": "需提前线上预约", "tips": ["避开早高峰"], "summary": "小众秘境"}
+
+    harness = TravelAgentHarness(registry=mock_reg)
+    events = []
+    async for ev in harness.run("sess_map_controller", "2026-09-21去北京玩1天"):
+        events.append(ev)
+
+    map_actions = [e for e in events if isinstance(e, MapActionEvent)]
+    assert len(map_actions) >= 3
+
+    action_names = [e.payload.get("action") for e in map_actions]
+    assert "FLY_TO" in action_names
+    assert "SPOTLIGHT_POI" in action_names
+    assert "SHOW_ISOCHRONE" in action_names
+    assert "DRAW_ROUTE" in action_names
+
+    # 验证 FLY_TO 数据
+    fly_to_event = next(e for e in map_actions if e.payload.get("action") == "FLY_TO")
+    assert fly_to_event.payload["data"]["city"] == "北京"
+    assert len(fly_to_event.payload["data"]["center"]) == 2
+
+    # 验证 SHOW_ISOCHRONE 数据
+    isochrone_event = next(e for e in map_actions if e.payload.get("action") == "SHOW_ISOCHRONE")
+    assert isochrone_event.payload["data"]["hotel_name"] == "王府井商圈酒店"
+    assert isochrone_event.payload["data"]["walking_minutes"] == 15
+
+    # 验证 DRAW_ROUTE 数据
+    draw_event = next(e for e in map_actions if e.payload.get("action") == "DRAW_ROUTE")
+    assert draw_event.payload["data"]["day_number"] == 1
+    assert len(draw_event.payload["data"]["polyline"]) >= 2
+

@@ -14,6 +14,7 @@ from ..tools.search_tools import (
     search_attractions_tool,
     search_hotel_minimax_tool,
     enrich_meals_tool,
+    discover_hidden_gems_tool,
 )
 from ..tools.planning_tools import (
     cluster_pois_tool,
@@ -100,3 +101,8 @@ def _tool_enrich_meals(plan_days: list[dict[str, Any]], city: str, food_preferen
 @travel_tools.register("fetch_tavily_notes", "搜索引擎仅针对最终确立的景点抓取门票与避坑事项")
 def _tool_tavily_notes(city: str, poi_name: str, **kwargs: Any):
     return search_tavily_poi_guides(city=city, poi_name=poi_name)
+
+
+@travel_tools.register("discover_hidden_gems", "探索城市小众特色秘境与高分美学宝藏")
+def _tool_discover_gems(city: str, center_coords: tuple[float, float] | None = None, limit: int = 2, **kwargs: Any):
+    return discover_hidden_gems_tool(city=city, center_coords=center_coords, limit=limit)

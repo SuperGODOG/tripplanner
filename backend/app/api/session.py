@@ -71,6 +71,8 @@ async def session_chat(request: ChatRequest, x_engine: str | None = Header(None)
                     yield _format_sse("plan_version", plan_payload)
                 elif event.event_type == "clarification":
                     yield _format_sse("clarification", event.payload)
+                elif event.event_type == "map_action":
+                    yield _format_sse("map_action", event.to_sse_dict())
                 elif event.event_type == "done":
                     yield _format_sse("done", event.payload)
                 else:

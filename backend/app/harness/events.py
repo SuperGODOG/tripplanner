@@ -114,6 +114,16 @@ class MessageDeltaEvent(HarnessEvent):
 
 
 @dataclass
+class MapActionEvent(HarnessEvent):
+    """动态地图交互与视口控制指令事件 (Agent as Map Controller)"""
+    def __init__(self, action: str, data: dict[str, Any]):
+        super().__init__(
+            event_type="map_action",
+            payload={"action": action, "data": data}
+        )
+
+
+@dataclass
 class TurnCompleteEvent(HarnessEvent):
     """单轮任务完整结束事件"""
     def __init__(self, session_id: str, success: bool = True, status: str = "completed"):

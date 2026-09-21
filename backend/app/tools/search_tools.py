@@ -727,3 +727,233 @@ def enrich_meals_tool(
         d["meals"] = final_meals
 
     return plan_days
+
+
+# ================================================================
+# Pi 风格在地秘境与宝藏探索引擎 (Serendipity & Hidden Gems Engine)
+# ================================================================
+
+CURATED_HIDDEN_GEMS: dict[str, list[dict[str, Any]]] = {
+    "北京": [
+        {
+            "name": "东交民巷欧式建筑群",
+            "lng": 116.4152,
+            "lat": 39.9042,
+            "category": "在地秘境",
+            "address": "北京市东城区东交民巷",
+            "reason": "北京最长胡同与近现代使馆建筑遗迹，绿树成荫，避开人潮的静谧散步地",
+            "rating": 4.7,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+        {
+            "name": "人艺戏剧博物馆",
+            "lng": 116.4184,
+            "lat": 39.9192,
+            "category": "在地秘境",
+            "address": "北京市东城区王府井大街22号首都剧场4层",
+            "reason": "国内首家戏剧专业博物馆，藏有人艺剧作家手稿与珍贵戏服，沉浸式话剧艺术殿堂",
+            "rating": 4.8,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+        {
+            "name": "智化寺明代梵乐",
+            "lng": 116.4385,
+            "lat": 39.9198,
+            "category": "在地秘境",
+            "address": "北京市东城区禄米仓胡同5号",
+            "reason": "明代古刹与中国古代音乐活化石，每日整点奏响非遗京音乐，藻井木雕绝美",
+            "rating": 4.8,
+            "price": 20.0,
+            "is_hidden_gem": True,
+        },
+        {
+            "name": "三联韬奋24小时书店",
+            "lng": 116.4190,
+            "lat": 39.9255,
+            "category": "在地秘境",
+            "address": "北京市东城区美术馆东街22号",
+            "reason": "文艺地标与精神栖息地，夜读空间安宁，满架社科文史沉淀古都慢时光",
+            "rating": 4.6,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+    ],
+    "上海": [
+        {
+            "name": "思南公馆文学小街",
+            "lng": 121.4682,
+            "lat": 31.2154,
+            "category": "在地秘境",
+            "address": "上海市黄浦区复兴中路505号",
+            "reason": "百年花园洋房与梧桐树影，作家书店与文艺沙龙交汇，感受优雅的海派文人气息",
+            "rating": 4.7,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+        {
+            "name": "多伦路文化名人街",
+            "lng": 121.4880,
+            "lat": 31.2650,
+            "category": "在地秘境",
+            "address": "上海市虹口区多伦路",
+            "reason": "鲁迅、茅盾、丁玲曾驻足的文化街区，红砖洋楼与旧书店沉淀民国文学往事",
+            "rating": 4.6,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+    ],
+    "成都": [
+        {
+            "name": "白药厂文创园",
+            "lng": 104.0750,
+            "lat": 30.6350,
+            "category": "在地秘境",
+            "address": "成都市武侯区超洋路9号",
+            "reason": "清末军工厂改造的复古工业园区，小众独立买手店、古着店与咖啡馆掩映其间",
+            "rating": 4.7,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+        {
+            "name": "望平街慢生活艺术街区",
+            "lng": 104.0920,
+            "lat": 30.6550,
+            "category": "在地秘境",
+            "address": "成都市成华区望平滨河路",
+            "reason": "锦江畔的市井文艺地标，茶馆与独立艺术书店并存，感受成都最地道的松弛感",
+            "rating": 4.8,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+    ],
+    "杭州": [
+        {
+            "name": "九溪十八涧隐幽茶径",
+            "lng": 120.1130,
+            "lat": 30.2050,
+            "category": "在地秘境",
+            "address": "杭州市西湖区龙井村南",
+            "reason": "青石溪流与龙井茶园环绕，绿树成荫无车马喧嚣，西湖最清幽的徒步秘境",
+            "rating": 4.8,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+        {
+            "name": "良渚文化艺术中心",
+            "lng": 120.0650,
+            "lat": 30.3660,
+            "category": "在地秘境",
+            "address": "杭州市余杭区玉鸟路",
+            "reason": "安藤忠雄设计的'大屋顶'清水混凝土建筑，春季樱花林与先锋书店相伴",
+            "rating": 4.7,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+    ],
+    "西安": [
+        {
+            "name": "湘子庙街青石古巷",
+            "lng": 108.9450,
+            "lat": 34.2540,
+            "category": "在地秘境",
+            "address": "西安市碑林区南门内湘子庙街",
+            "reason": "南门城墙脚下的幽静老街，道教古庙与民谣清吧、文艺茶舍相映成趣",
+            "rating": 4.7,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+        {
+            "name": "老钢厂设计创意园",
+            "lng": 109.0050,
+            "lat": 34.2500,
+            "category": "在地秘境",
+            "address": "西安市新城区幸福南路109号",
+            "reason": "陕钢老厂房改造的工业美学地标，工业齿轮与艺术书吧碰撞出复古文艺质感",
+            "rating": 4.6,
+            "price": 0.0,
+            "is_hidden_gem": True,
+        },
+    ],
+}
+
+
+def discover_hidden_gems_tool(
+    city: str,
+    center_coords: tuple[float, float] | None = None,
+    radius_km: float = 8.0,
+    limit: int = 2,
+    amap_wrapper: Any | None = None,
+) -> list[dict[str, Any]]:
+    """发掘城市小众秘境、在地文化美学与避开人潮的宝藏打卡点
+
+    - 优先匹配高质量策划的在地私藏库；
+    - 若传入中心坐标，按直线几何距离排序就近推荐；
+    - 若城市冷门，支持自动合成高美学在地文化漫步点，绝不落空。
+    """
+    gems: list[dict[str, Any]] = []
+
+    # 1. 优先查阅策划秘境库
+    for c_key, c_gems in CURATED_HIDDEN_GEMS.items():
+        if c_key in city or city in c_key:
+            gems.extend([dict(g) for g in c_gems])
+            break
+
+    # 2. 若未直接命中且有 amap_wrapper，尝试检索小众文创/历史名胜
+    if not gems and amap_wrapper is not None:
+        try:
+            raw_res = amap_wrapper.search_pois(city, "attraction", f"{city} 小众景点", max_results=5)
+            for r in (raw_res or []):
+                p_name = getattr(r, "name", "") or r.get("name", "")
+                p_lng = float(getattr(r, "lng", 0.0) or r.get("lng", 0.0))
+                p_lat = float(getattr(r, "lat", 0.0) or r.get("lat", 0.0))
+                if p_name and p_lng and p_lat:
+                    gems.append({
+                        "name": p_name,
+                        "lng": p_lng,
+                        "lat": p_lat,
+                        "category": "在地秘境",
+                        "address": getattr(r, "address", "") or r.get("address", ""),
+                        "reason": f"高德本地高分小众漫游点，感受【{city}】地道市井与人文韵味",
+                        "rating": float(getattr(r, "rating", 4.6) or 4.6),
+                        "price": 0.0,
+                        "is_hidden_gem": True,
+                    })
+        except Exception as e:
+            logger.debug("动态检索在地秘境降级: %s", e)
+
+    # 3. 兜底高审美保底秘境
+    if not gems:
+        c_lng, c_lat = center_coords if center_coords else (116.407, 39.904)
+        gems = [
+            {
+                "name": f"{city}在地文化慢游巷",
+                "lng": round(c_lng + 0.012, 4),
+                "lat": round(c_lat + 0.008, 4),
+                "category": "在地秘境",
+                "address": f"{city}老城文化街区",
+                "reason": "避开人流密集的传统景点，沿老街探访独立文创与市井烟火",
+                "rating": 4.7,
+                "price": 0.0,
+                "is_hidden_gem": True,
+            },
+            {
+                "name": f"{city}当代艺术与设计空间",
+                "lng": round(c_lng - 0.015, 4),
+                "lat": round(c_lat + 0.011, 4),
+                "category": "在地秘境",
+                "address": f"{city}创意园区",
+                "reason": "工业遗存改造的先锋艺术空间，适合静心闲逛与拍照打卡",
+                "rating": 4.8,
+                "price": 0.0,
+                "is_hidden_gem": True,
+            },
+        ]
+
+    # 4. 若传入中心坐标，按与中心的距离就近推荐
+    if center_coords and len(center_coords) == 2:
+        clng, clat = center_coords
+        gems.sort(key=lambda g: haversine_km(clng, clat, g["lng"], g["lat"]))
+
+    return gems[:limit]

@@ -24,6 +24,7 @@ from .events import (
     InvariantViolationEvent,
     PlanVersionEvent,
     MessageDeltaEvent,
+    MapActionEvent,
     TurnCompleteEvent,
 )
 from .invariants import TravelInvariants
@@ -33,6 +34,7 @@ from ..agents.clarification_agent import extract_slots_from_input, check_clarifi
 from ..memory.repository import get_memory_repository
 from ..models.session import EffectiveRequirements, SlotOrigin
 from ..services.poi_synthesizer import synthesize_city_pois
+from ..tools.search_tools import get_city_center
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +126,14 @@ class TravelAgentHarness:
             detail=f"识别目的地: {city}, 天数: {days}天, 景点偏好: {scenic_prefs or '全城经典'}, 美食偏好: {food_prefs or '地道美食'}"
         )
 
+        # ── 地图动作：Agent as Map Controller (FLY_TO 城市全局视口) ──
+        center_coord = get_city_center(city)
+        center_lng_lat = [float(center_coord[0]), float(center_coord[1])] if center_coord else [116.407, 39.904]
+        yield MapActionEvent(
+            action="FLY_TO",
+            data={"city": city, "center": center_lng_lat, "zoom": 12, "title": f"定位至目的地【{city}】"}
+        )
+
         turn = 0
         final_plan: dict[str, Any] = {}
 
@@ -186,6 +196,46 @@ class TravelAgentHarness:
                     if filtered_pool:
                         candidate_pool = filtered_pool
 
+            # ── 探索拓展：发掘在地特色秘境与文化美学宝藏 (Pi Serendipity Engine) ──
+            raw_gems = []
+            if self.registry.get_tool("discover_hidden_gems"):
+                yield ToolStartEvent(tool_name="discover_hidden_gems", arguments={"city": city})
+                raw_gems, gem_dur = await self.registry.call("discover_hidden_gems", city=city, center_coords=center_lng_lat, limit=2)
+                yield ToolEndEvent(tool_name="discover_hidden_gems", result_summary=f"发掘到 {len(raw_gems or [])} 处在地特色秘境", duration_ms=gem_dur)
+            else:
+                from ..tools.search_tools import discover_hidden_gems_tool
+                raw_gems = discover_hidden_gems_tool(city=city, center_coords=center_lng_lat, limit=2)
+
+            # 发射地图动作：在地秘境脉冲高亮 (SPOTLIGHT_POI)
+            for g in (raw_gems or []):
+                yield MapActionEvent(
+                    action="SPOTLIGHT_POI",
+                    data={
+                        "poi": g.get("name"),
+                        "coords": [float(g.get("lng", 0.0)), float(g.get("lat", 0.0))],
+                        "tag": "💎 在地秘境",
+                        "category": g.get("category", "在地秘境"),
+                        "reason": g.get("reason", "避开人潮的本地私藏"),
+                    }
+                )
+
+            # 将 1 处高品质在地秘境适度混入候选池（若未打卡过）
+            for g in (raw_gems or [])[:1]:
+                g_name = g.get("name", "")
+                if g_name and g_name not in visited_names and g_name not in {x.get("name") for x in candidate_pool}:
+                    candidate_pool.append({
+                        "name": g_name,
+                        "lng": float(g.get("lng", 0.0)),
+                        "lat": float(g.get("lat", 0.0)),
+                        "category": "在地秘境",
+                        "typecode": "110000",
+                        "price": float(g.get("price", 0.0)),
+                        "rating": float(g.get("rating", 4.8)),
+                        "visit_minutes": 90,
+                        "is_hidden_gem": True,
+                        "reason": g.get("reason", "在地小众美学宝藏"),
+                    })
+
             # ── Step 2: Agent 调用算法 (KMeans -> Minimax -> 2-Opt -> 三餐富化) ──
             yield ToolStartEvent(tool_name="cluster_days_kmeans", arguments={"days": days, "poi_count": len(candidate_pool)})
             clusters, dur_ms = await self.registry.call("cluster_days_kmeans", pois=candidate_pool, days=days)
@@ -195,6 +245,18 @@ class TravelAgentHarness:
             hotel_res, dur_ms = await self.registry.call("select_minimax_hotel", city=city, attraction_coords=candidate_pool)
             hotel_selected = dict(hotel_res.get("hotel_selected", {})) if isinstance(hotel_res, dict) else {}
             yield ToolEndEvent(tool_name="select_minimax_hotel", result_summary=hotel_selected.get("name", "商圈酒店"), duration_ms=dur_ms)
+
+            # 发射地图动作：Minimax 酒店 15min 步行等时圈 (SHOW_ISOCHRONE)
+            if hotel_selected and hotel_selected.get("lng") and hotel_selected.get("lat"):
+                yield MapActionEvent(
+                    action="SHOW_ISOCHRONE",
+                    data={
+                        "hotel_name": hotel_selected.get("name", "商圈核心酒店"),
+                        "coords": [float(hotel_selected["lng"]), float(hotel_selected["lat"])],
+                        "radius_km": 3.0,
+                        "walking_minutes": 15,
+                    }
+                )
 
             base_date = datetime.now().date()
             plan_days = []
@@ -226,6 +288,24 @@ class TravelAgentHarness:
                         ordered_attrs.append(orig)
                 else:
                     ordered_attrs = day_pois
+
+                # 发射地图动作：绘制当前天 2-Opt 路径收敛折线 (DRAW_ROUTE)
+                polyline = [
+                    [float(p.get("lng", 0.0)), float(p.get("lat", 0.0))]
+                    for p in ordered_attrs
+                    if p.get("lng") and p.get("lat")
+                ]
+                if polyline:
+                    day_colors = ["#38bdf8", "#34d399", "#fbbf24", "#f472b6", "#a78bfa"]
+                    yield MapActionEvent(
+                        action="DRAW_ROUTE",
+                        data={
+                            "day_number": d_idx + 1,
+                            "polyline": polyline,
+                            "color": day_colors[d_idx % len(day_colors)],
+                            "poi_names": [p.get("name") for p in ordered_attrs if p.get("name")],
+                        }
+                    )
 
                 plan_days.append({
                     "day_index": d_idx,

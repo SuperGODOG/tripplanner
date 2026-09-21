@@ -177,15 +177,32 @@
         <!-- ════════ 右栏：三轨需求与实时行程看板 ════════ -->
         <section class="right-column glass-panel">
           <div class="panel-header">
-            <div class="panel-title">
-              <span class="icon">🗺️</span> 实时定制行程看板
+            <div class="panel-title-group">
+              <span class="icon">🧭</span>
+              <span class="panel-main-title">空间探索与定制看板</span>
+            </div>
+            <!-- Pi 风格看板与动态地图双重视图切换器 -->
+            <div class="view-switch-tabs">
+              <button
+                :class="['tab-btn', activeRightTab === 'board' ? 'active' : '']"
+                @click="activeRightTab = 'board'"
+              >
+                📋 分日详情看板
+              </button>
+              <button
+                :class="['tab-btn', activeRightTab === 'map' ? 'active' : '']"
+                @click="activeRightTab = 'map'"
+              >
+                🗺️ 空间探索地图
+                <span v-if="mapActionsCount > 0" class="tab-action-badge">{{ mapActionsCount }}</span>
+              </button>
             </div>
             <div class="panel-actions" v-if="currentPlan">
               <span class="plan-version-badge">版本 v{{ currentPlan.version_id || 1 }}</span>
             </div>
           </div>
 
-          <div class="board-scrollable">
+          <div v-show="activeRightTab === 'board'" class="board-scrollable">
             <!-- 1. 当前三轨有效需求卡片 -->
             <div class="effective-reqs-card">
               <div class="reqs-title">
@@ -338,6 +355,22 @@
                             {{ getFactLabel(attr.place_fact) }}
                           </span>
                           <span class="ticket-tag">¥{{ attr.price || attr.ticket_price || 0 }}</span>
+                          <!-- 💎 在地秘境 Badge -->
+                          <span
+                            v-if="attr.is_hidden_gem || attr.category === '在地秘境'"
+                            class="gem-badge"
+                            title="在地秘境：避开人潮的本地高美学私藏"
+                          >
+                            💎 在地秘境
+                          </span>
+                          <!-- 🧭 在空间地图中定位 -->
+                          <button
+                            class="btn-locate-map"
+                            @click.stop="focusPoiOnMap(attr)"
+                            title="在空间探索地图中定位此地"
+                          >
+                            🧭 空间定位
+                          </button>
                           <!-- 👣 游览打卡/足迹标记按钮 -->
                           <button
                             :class="['btn-footprint-tag', isPoiVisited(attr.name) ? 'is-visited' : '']"
@@ -363,6 +396,11 @@
                         <span v-if="attr.business_area" class="meta-item area-tag">
                           🏞️ {{ attr.business_area }}
                         </span>
+                      </div>
+
+                      <!-- 💎 秘境推荐理由 -->
+                      <div v-if="attr.reason" class="attr-gem-reason">
+                        ✨ <strong>秘境特色</strong>：{{ attr.reason }}
                       </div>
 
                       <!-- 📍 详细门牌地址 -->
@@ -450,6 +488,240 @@
               <div class="empty-icon">📍</div>
               <div class="empty-title">等待行程生成中...</div>
               <div class="empty-sub">在左侧对话框告诉顾问您的目的地或点击选项，系统将在此即时渲染最优日内路线与事实核验结果。</div>
+            </div>
+          </div>
+
+          <!-- 视图 B：Pi 风格 Agent as Map Controller 动态空间地图与在地探索中枢 -->
+          <div v-show="activeRightTab === 'map'" class="map-scrollable">
+            <!-- 地图控制顶栏 -->
+            <div class="map-control-bar">
+              <div class="viewport-info">
+                <span class="vp-icon">📍</span>
+                <span class="vp-text">
+                  视口: <strong>{{ mapViewport.city || getSlotValue('city') || '全国' }}</strong>
+                  <span class="vp-coord" v-if="mapViewport.center && mapViewport.center.length >= 2">
+                    ({{ Number(mapViewport.center[0]).toFixed(3) }}, {{ Number(mapViewport.center[1]).toFixed(3) }})
+                  </span>
+                  · 缩放: Lv.{{ mapViewport.zoom || 12 }}
+                </span>
+              </div>
+              <div class="map-layer-toggles">
+                <label class="layer-toggle" title="切换路径折线显示">
+                  <input type="checkbox" v-model="mapLayers.routes" />
+                  <span>路线</span>
+                </label>
+                <label class="layer-toggle" title="切换 Minimax 酒店 15min 步行等时圈显示">
+                  <input type="checkbox" v-model="mapLayers.isochrone" />
+                  <span>等时圈</span>
+                </label>
+                <label class="layer-toggle" title="切换在地秘境打卡点显示">
+                  <input type="checkbox" v-model="mapLayers.gems" />
+                  <span>💎 秘境</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- SVG 交互式空间地图画布 -->
+            <div class="svg-map-wrapper">
+              <svg
+                class="vector-map-canvas"
+                viewBox="0 0 800 460"
+                preserveAspectRatio="xMidYMid meet"
+              >
+                <defs>
+                  <!-- 网格图案 -->
+                  <pattern id="mapGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255, 255, 255, 0.05)" stroke-width="1"/>
+                  </pattern>
+                  <!-- 酒店等时圈径向渐变 -->
+                  <radialGradient id="isochroneGrad" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="rgba(56, 189, 248, 0.28)" />
+                    <stop offset="70%" stop-color="rgba(56, 189, 248, 0.08)" />
+                    <stop offset="100%" stop-color="rgba(56, 189, 248, 0)" />
+                  </radialGradient>
+                  <!-- 秘境发光微光 -->
+                  <radialGradient id="gemGrad" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="rgba(244, 114, 182, 0.6)" />
+                    <stop offset="100%" stop-color="rgba(244, 114, 182, 0)" />
+                  </radialGradient>
+                </defs>
+
+                <!-- 背景网格与底色 -->
+                <rect width="800" height="460" fill="#0c121e" rx="12" />
+                <rect width="800" height="460" fill="url(#mapGrid)" rx="12" />
+
+                <!-- 罗盘指示器 -->
+                <g class="compass-rose" transform="translate(750, 45)">
+                  <circle r="18" fill="rgba(15, 23, 42, 0.7)" stroke="rgba(255, 255, 255, 0.15)" stroke-width="1" />
+                  <polygon points="0,-14 4,-2 0,0 -4,-2" fill="#ef4444" />
+                  <polygon points="0,14 4,2 0,0 -4,2" fill="#94a3b8" />
+                  <text y="-18" text-anchor="middle" font-size="9" fill="#f87171" font-weight="bold">N</text>
+                </g>
+
+                <!-- 比例尺 -->
+                <g class="map-scale" transform="translate(30, 435)">
+                  <line x1="0" y1="0" x2="60" y2="0" stroke="rgba(255, 255, 255, 0.4)" stroke-width="2" />
+                  <line x1="0" y1="-4" x2="0" y2="4" stroke="rgba(255, 255, 255, 0.4)" stroke-width="2" />
+                  <line x1="60" y1="-4" x2="60" y2="4" stroke="rgba(255, 255, 255, 0.4)" stroke-width="2" />
+                  <text x="30" y="-6" text-anchor="middle" font-size="10" fill="rgba(255, 255, 255, 0.5)">~5 km</text>
+                </g>
+
+                <!-- 1. Minimax 酒店 15min 步行等时圈 -->
+                <g v-if="mapLayers.isochrone && projectedMapData.isochroneCircle" class="isochrone-group">
+                  <circle
+                    :cx="projectedMapData.isochroneCircle.cx"
+                    :cy="projectedMapData.isochroneCircle.cy"
+                    :r="projectedMapData.isochroneCircle.r"
+                    fill="url(#isochroneGrad)"
+                    stroke="#38bdf8"
+                    stroke-width="1.5"
+                    stroke-dasharray="4,4"
+                    class="pulsing-isochrone-ring"
+                  />
+                  <text
+                    :x="projectedMapData.isochroneCircle.cx"
+                    :y="projectedMapData.isochroneCircle.cy + projectedMapData.isochroneCircle.r + 14"
+                    text-anchor="middle"
+                    fill="#38bdf8"
+                    font-size="10"
+                    font-weight="bold"
+                    class="map-svg-label"
+                  >
+                    🚶 15min 步行商圈 (3km)
+                  </text>
+                </g>
+
+                <!-- 2. 日程 2-Opt 路径折线 -->
+                <g v-if="mapLayers.routes">
+                  <g v-for="r in projectedMapData.routes" :key="'route-' + r.day" class="route-line-group">
+                    <path
+                      :d="r.path"
+                      fill="none"
+                      :stroke="r.color"
+                      stroke-width="3.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="animated-route-path"
+                    />
+                  </g>
+                </g>
+
+                <!-- 3. Minimax 酒店中心点 -->
+                <g
+                  v-if="projectedMapData.hotelNode"
+                  class="map-node hotel-node"
+                  :transform="`translate(${projectedMapData.hotelNode.x}, ${projectedMapData.hotelNode.y})`"
+                  @click="selectMapPoi({ name: projectedMapData.hotelNode.name, category: 'Minimax 商圈酒店', type: 'hotel', price: '含在预算', note: '极小化每日通勤中心' })"
+                >
+                  <circle r="16" fill="rgba(14, 165, 233, 0.2)" class="beacon-pulse" />
+                  <circle r="12" fill="#0284c7" stroke="#38bdf8" stroke-width="2" />
+                  <text y="4" text-anchor="middle" font-size="12">🏨</text>
+                  <text y="-16" text-anchor="middle" fill="#7dd3fc" font-size="11" font-weight="bold" class="map-node-label">
+                    {{ projectedMapData.hotelNode.name }}
+                  </text>
+                </g>
+
+                <!-- 4. 景点 POI 节点 -->
+                <g v-if="mapLayers.pois">
+                  <g
+                    v-for="(p, pIdx) in projectedMapData.poiNodes"
+                    :key="'poi-' + pIdx"
+                    class="map-node poi-node"
+                    :transform="`translate(${p.x}, ${p.y})`"
+                    @click="selectMapPoi(p)"
+                  >
+                    <!-- 悬浮微光 -->
+                    <circle r="15" fill="rgba(255, 255, 255, 0.08)" />
+                    <!-- 主圆点 -->
+                    <circle
+                      r="10"
+                      :fill="isItemLocked(p.name) ? '#f59e0b' : (isPoiVisited(p.name) ? '#10b981' : '#3b82f6')"
+                      stroke="#ffffff"
+                      stroke-width="1.5"
+                    />
+                    <!-- 编号标签 -->
+                    <text y="3.5" text-anchor="middle" fill="#ffffff" font-size="8.5" font-weight="bold">
+                      {{ p.day }}-{{ p.order }}
+                    </text>
+                    <!-- 文本名称 -->
+                    <text
+                      y="20"
+                      text-anchor="middle"
+                      fill="#e2e8f0"
+                      font-size="10.5"
+                      font-weight="500"
+                      class="map-node-label"
+                    >
+                      {{ p.name }}
+                    </text>
+                  </g>
+                </g>
+
+                <!-- 5. 在地秘境脉冲节点 (Pi Serendipity Spotlight) -->
+                <g v-if="mapLayers.gems">
+                  <g
+                    v-for="(g, gIdx) in projectedMapData.gemNodes"
+                    :key="'gem-' + gIdx"
+                    class="map-node gem-node"
+                    :transform="`translate(${g.x}, ${g.y})`"
+                    @click="selectMapPoi(g)"
+                  >
+                    <circle r="22" fill="url(#gemGrad)" class="gem-pulse" />
+                    <circle r="13" fill="#be185d" stroke="#f472b6" stroke-width="2" />
+                    <text y="4" text-anchor="middle" font-size="11">💎</text>
+                    <text y="-17" text-anchor="middle" fill="#f472b6" font-size="10.5" font-weight="bold" class="map-node-label">
+                      {{ g.name }}
+                    </text>
+                  </g>
+                </g>
+              </svg>
+
+              <!-- 悬浮选定节点详情浮层 (Interactive POI Inspector) -->
+              <Transition name="fade">
+                <div v-if="selectedMapNode" class="poi-inspector-overlay">
+                  <div class="inspector-card glass-panel">
+                    <div class="inspector-header">
+                      <div class="inspector-title">
+                        <span class="inspector-icon">{{ selectedMapNode.type === 'gem' ? '💎' : (selectedMapNode.type === 'hotel' ? '🏨' : '📍') }}</span>
+                        <strong>{{ selectedMapNode.name }}</strong>
+                        <span v-if="selectedMapNode.type === 'gem'" class="badge-gem">在地秘境</span>
+                        <span v-if="isPoiVisited(selectedMapNode.name)" class="badge-visited">✓ 已打卡</span>
+                      </div>
+                      <button class="btn-close-inspector" @click="selectedMapNode = null">✕</button>
+                    </div>
+                    <div class="inspector-body">
+                      <div v-if="selectedMapNode.reason" class="inspector-reason">
+                        ✨ <strong>秘境特色</strong>：{{ selectedMapNode.reason }}
+                      </div>
+                      <div class="inspector-meta-row">
+                        <span v-if="selectedMapNode.rating" class="meta-tag">⭐ {{ selectedMapNode.rating }}分</span>
+                        <span v-if="selectedMapNode.arrive_time" class="meta-tag">⏰ {{ selectedMapNode.arrive_time }} - {{ selectedMapNode.depart_time }}</span>
+                        <span v-if="selectedMapNode.price !== undefined" class="meta-tag">🎫 ¥{{ selectedMapNode.price }}</span>
+                        <span v-if="selectedMapNode.walking_minutes" class="meta-tag">🚶 {{ selectedMapNode.walking_minutes }}min 步行商圈</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Transition>
+            </div>
+
+            <!-- Agent as Map Controller 实时调度事件流面板 (Controller Feed) -->
+            <div class="map-action-feed-box">
+              <div class="feed-header">
+                <span class="feed-icon">🤖</span>
+                <span class="feed-title">Agent 地图控制器实时调度记录 (Agent as Map Controller)</span>
+                <span class="feed-count">{{ mapActionFeed.length }} 条动作</span>
+              </div>
+              <div class="feed-list" v-if="mapActionFeed.length">
+                <div v-for="(act, idx) in mapActionFeed" :key="idx" class="feed-item">
+                  <span class="feed-badge">{{ act.badge }} {{ act.action }}</span>
+                  <span class="feed-detail">{{ act.detail }}</span>
+                  <span class="feed-time">{{ act.time }}</span>
+                </div>
+              </div>
+              <div v-else class="feed-empty">
+                暂无地图控制动作。在左侧发送规划需求，Agent 将实时接管视口并绘制 2-Opt 最优空间路径。
+              </div>
             </div>
           </div>
         </section>
@@ -660,6 +932,179 @@ const currentPlan = ref(null)
 const lockedItems = ref([])
 const attemptedActions = ref([])
 
+// ── Pi 风格地图与在地探索状态 (Agent as Map Controller) ──
+const activeRightTab = ref('board') // 'board' | 'map'
+const mapActionsCount = ref(0)
+const mapViewport = ref({ city: '北京', center: [116.407, 39.904], zoom: 12, title: '' })
+const mapIsochrone = ref(null) // { hotel_name, coords, radius_km, walking_minutes }
+const mapRoutes = ref([]) // [ { day_number, polyline, color, poi_names } ]
+const mapSpotlights = ref([]) // [ { poi, coords, tag, category, reason } ]
+const mapActionFeed = ref([]) // [ { time, action, badge, detail } ]
+const selectedMapNode = ref(null)
+const mapLayers = reactive({ routes: true, isochrone: true, gems: true, pois: true })
+
+function selectMapPoi(poi) {
+  selectedMapNode.value = poi
+}
+
+function focusPoiOnMap(attr) {
+  activeRightTab.value = 'map'
+  selectedMapNode.value = {
+    name: attr.name,
+    category: attr.category || (attr.is_hidden_gem ? '在地秘境' : '精选景点'),
+    price: attr.price || attr.ticket_price || 0,
+    rating: attr.rating,
+    arrive_time: attr.arrive_time,
+    depart_time: attr.depart_time,
+    reason: attr.reason,
+    type: attr.is_hidden_gem ? 'gem' : 'attraction',
+  }
+}
+
+// ── 矢量空间地图几何投影算法 (SVG Normalizer) ──
+const projectedMapData = computed(() => {
+  const points = []
+
+  // 1. 酒店中心
+  if (mapIsochrone.value && mapIsochrone.value.coords && mapIsochrone.value.coords.length >= 2) {
+    points.push({
+      lng: parseFloat(mapIsochrone.value.coords[0]),
+      lat: parseFloat(mapIsochrone.value.coords[1]),
+      type: 'hotel',
+    })
+  }
+
+  // 2. 日程景点
+  if (currentPlan.value && currentPlan.value.days) {
+    currentPlan.value.days.forEach((d) => {
+      ;(d.attractions || []).forEach((a, idx) => {
+        if (a.lng && a.lat) {
+          points.push({
+            lng: parseFloat(a.lng),
+            lat: parseFloat(a.lat),
+            name: a.name,
+            day: d.day_number || d.day_index + 1,
+            order: idx + 1,
+            price: a.price || a.ticket_price || 0,
+            rating: a.rating,
+            is_hidden_gem: a.is_hidden_gem || a.category === '在地秘境',
+            reason: a.reason,
+            arrive_time: a.arrive_time,
+            depart_time: a.depart_time,
+            type: 'attraction',
+          })
+        }
+      })
+    })
+  }
+
+  // 3. 在地秘境打卡点
+  mapSpotlights.value.forEach((s) => {
+    if (s.coords && s.coords.length === 2) {
+      points.push({
+        lng: parseFloat(s.coords[0]),
+        lat: parseFloat(s.coords[1]),
+        name: s.poi,
+        tag: s.tag || '在地秘境',
+        reason: s.reason,
+        category: s.category,
+        type: 'gem',
+      })
+    }
+  })
+
+  // 若无点，兜底使用当前视口中心
+  if (points.length === 0) {
+    const c = mapViewport.value.center || [116.407, 39.904]
+    points.push({ lng: parseFloat(c[0]), lat: parseFloat(c[1]), name: mapViewport.value.city || '城市中心', type: 'center' })
+  }
+
+  const lngs = points.map(p => p.lng)
+  const lats = points.map(p => p.lat)
+
+  let minLng = Math.min(...lngs)
+  let maxLng = Math.max(...lngs)
+  let minLat = Math.min(...lats)
+  let maxLat = Math.max(...lats)
+
+  const padLng = Math.max((maxLng - minLng) * 0.25, 0.06)
+  const padLat = Math.max((maxLat - minLat) * 0.25, 0.04)
+
+  minLng -= padLng
+  maxLng += padLng
+  minLat -= padLat
+  maxLat += padLat
+
+  const width = 800
+  const height = 460
+  const padding = 55
+
+  function project(lng, lat) {
+    const x = padding + ((lng - minLng) / (maxLng - minLng)) * (width - 2 * padding)
+    const y = height - (padding + ((lat - minLat) / (maxLat - minLat)) * (height - 2 * padding))
+    return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 }
+  }
+
+  // 酒店节点与等时圈投影
+  let hotelNode = null
+  let isochroneCircle = null
+  if (mapIsochrone.value && mapIsochrone.value.coords && mapIsochrone.value.coords.length >= 2) {
+    const hp = project(mapIsochrone.value.coords[0], mapIsochrone.value.coords[1])
+    hotelNode = {
+      ...hp,
+      name: mapIsochrone.value.hotel_name || '商圈核心酒店',
+      walking_minutes: mapIsochrone.value.walking_minutes || 15,
+      radius_km: mapIsochrone.value.radius_km || 3.0,
+    }
+    const rKm = mapIsochrone.value.radius_km || 3.0
+    const pixelR = Math.max(35, Math.min(130, ((rKm / 111.0) / (maxLat - minLat)) * (height - 2 * padding)))
+    isochroneCircle = { cx: hp.x, cy: hp.y, r: Math.round(pixelR) }
+  }
+
+  // 路线折线投影
+  const dayColors = ['#38bdf8', '#34d399', '#fbbf24', '#f472b6', '#a78bfa']
+  const routes = mapRoutes.value.map((r, rIdx) => {
+    const coords = (r.polyline || []).map(pt => project(pt[0], pt[1]))
+    let pathStr = ''
+    if (coords.length > 0) {
+      pathStr = `M ${coords[0].x} ${coords[0].y}`
+      for (let i = 1; i < coords.length; i++) {
+        pathStr += ` L ${coords[i].x} ${coords[i].y}`
+      }
+    }
+    return {
+      day: r.day_number || rIdx + 1,
+      color: r.color || dayColors[rIdx % dayColors.length],
+      path: pathStr,
+      points: coords,
+    }
+  })
+
+  // 景点节点投影
+  const poiNodes = points
+    .filter(p => p.type === 'attraction')
+    .map(p => {
+      const pos = project(p.lng, p.lat)
+      return { ...p, ...pos }
+    })
+
+  // 在地秘境投影
+  const gemNodes = points
+    .filter(p => p.type === 'gem')
+    .map(p => {
+      const pos = project(p.lng, p.lat)
+      return { ...p, ...pos }
+    })
+
+  return {
+    hotelNode,
+    isochroneCircle,
+    routes,
+    poiNodes,
+    gemNodes,
+  }
+})
+
 const quickPrompts = [
   '我想去北京玩3天，预算5000元',
   '必须去故宫和天坛，平时一直吃辣',
@@ -867,6 +1312,61 @@ async function sendChatRequest(text, actionPayload = null) {
         } else if (eventName === 'clarification') {
           assistantMsg.clarification = parsed
           scrollToBottom()
+        } else if (eventName === 'map_action') {
+          mapActionsCount.value++
+          const act = parsed.action
+          const d = parsed.data || {}
+          const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+          if (act === 'FLY_TO') {
+            mapViewport.value = {
+              city: d.city || '未知城市',
+              center: d.center || [116.407, 39.904],
+              zoom: d.zoom || 12,
+              title: d.title || `定位至【${d.city}】`,
+            }
+            mapActionFeed.value.unshift({
+              time: nowStr,
+              action: 'FLY_TO',
+              badge: '✈️',
+              detail: `镜头飞越至【${d.city}】全局视口 (缩放: Lv.${d.zoom || 12})`,
+            })
+          } else if (act === 'SHOW_ISOCHRONE') {
+            mapIsochrone.value = d
+            mapActionFeed.value.unshift({
+              time: nowStr,
+              action: 'SHOW_ISOCHRONE',
+              badge: '⭕',
+              detail: `展开【${d.hotel_name || '商圈酒店'}】15min 步行等时圈 (${d.radius_km || 3}km)`,
+            })
+          } else if (act === 'DRAW_ROUTE') {
+            const existingIdx = mapRoutes.value.findIndex(r => r.day_number === d.day_number)
+            if (existingIdx >= 0) {
+              mapRoutes.value[existingIdx] = d
+            } else {
+              mapRoutes.value.push(d)
+            }
+            mapActionFeed.value.unshift({
+              time: nowStr,
+              action: 'DRAW_ROUTE',
+              badge: '⚡',
+              detail: `Day ${d.day_number} 2-Opt 路径收敛 (${(d.polyline || []).length} 处节点)`,
+            })
+          } else if (act === 'SPOTLIGHT_POI') {
+            if (!mapSpotlights.value.some(s => s.poi === d.poi)) {
+              mapSpotlights.value.push(d)
+            }
+            mapActionFeed.value.unshift({
+              time: nowStr,
+              action: 'SPOTLIGHT_POI',
+              badge: '💎',
+              detail: `发现在地秘境 · ${d.poi} (${d.reason || d.tag})`,
+            })
+          }
+          if (mapActionFeed.value.length > 25) {
+            mapActionFeed.value.pop()
+          }
+          saveSessionCache()
         } else if (eventName === 'message' || eventName === 'message_delta') {
           const txt = parsed.delta !== undefined ? parsed.delta : (parsed.content || parsed)
           if (eventName === 'message_delta') {
@@ -937,6 +1437,12 @@ function saveSessionCache() {
       currentPlan: currentPlan.value,
       lockedItems: lockedItems.value,
       attemptedActions: attemptedActions.value,
+      mapViewport: mapViewport.value,
+      mapIsochrone: mapIsochrone.value,
+      mapRoutes: mapRoutes.value,
+      mapSpotlights: mapSpotlights.value,
+      mapActionFeed: mapActionFeed.value,
+      mapActionsCount: mapActionsCount.value,
       updatedAt: Date.now(),
     }
     localStorage.setItem(getCacheKey(), JSON.stringify(cachePayload))
@@ -965,6 +1471,12 @@ function loadSessionCache() {
     if (parsed.attemptedActions) {
       attemptedActions.value = parsed.attemptedActions
     }
+    if (parsed.mapViewport) mapViewport.value = parsed.mapViewport
+    if (parsed.mapIsochrone) mapIsochrone.value = parsed.mapIsochrone
+    if (parsed.mapRoutes) mapRoutes.value = parsed.mapRoutes
+    if (parsed.mapSpotlights) mapSpotlights.value = parsed.mapSpotlights
+    if (parsed.mapActionFeed) mapActionFeed.value = parsed.mapActionFeed
+    if (parsed.mapActionsCount) mapActionsCount.value = parsed.mapActionsCount
     return true
   } catch (e) {
     console.warn('读取会话本地快照失败:', e)
@@ -1056,6 +1568,12 @@ function resetSession() {
   currentPlan.value = null
   lockedItems.value = []
   attemptedActions.value = []
+  mapActionsCount.value = 0
+  mapRoutes.value = []
+  mapIsochrone.value = null
+  mapSpotlights.value = []
+  mapActionFeed.value = []
+  selectedMapNode.value = null
   messages.value = [
     {
       id: Date.now(),
@@ -2217,6 +2735,8 @@ onMounted(async () => {
   .copilot-container {
     height: auto;
   }
+}
+
 /* ── 多租户身份选择器 ── */
 .user-tenant-picker {
   display: flex;
@@ -2517,5 +3037,391 @@ onMounted(async () => {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Pi 风格：双重视图切换器 (Tabs) & 在地秘境 (Serendipity Gems)
+   ══════════════════════════════════════════════════════════════ */
+.panel-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-main-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.view-switch-tabs {
+  display: flex;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+}
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tab-btn:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.05);
+}
+.tab-btn.active {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(99, 102, 241, 0.25));
+  color: #38bdf8;
+  font-weight: 600;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+}
+.tab-action-badge {
+  background: #38bdf8;
+  color: #0f172a;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+}
+
+/* 💎 在地秘境 Badge 与理由 */
+.gem-badge {
+  background: linear-gradient(135deg, rgba(244, 114, 182, 0.25), rgba(217, 70, 239, 0.25));
+  border: 1px solid rgba(244, 114, 182, 0.6);
+  color: #f472b6;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  box-shadow: 0 0 8px rgba(244, 114, 182, 0.25);
+  animation: gemBadgeGlow 3s ease-in-out infinite alternate;
+}
+@keyframes gemBadgeGlow {
+  0% { box-shadow: 0 0 6px rgba(244, 114, 182, 0.2); }
+  100% { box-shadow: 0 0 12px rgba(244, 114, 182, 0.5); }
+}
+
+.attr-gem-reason {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(244, 114, 182, 0.1), rgba(168, 85, 247, 0.05));
+  border-left: 3px solid #f472b6;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #fbcfe8;
+}
+.attr-gem-reason strong {
+  color: #f472b6;
+}
+
+.btn-locate-map {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-locate-map:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: #38bdf8;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Pi 风格：Agent as Map Controller 空间探索动态地图
+   ══════════════════════════════════════════════════════════════ */
+.map-scrollable {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.map-control-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+.viewport-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+.vp-icon {
+  font-size: 14px;
+}
+.vp-coord {
+  color: #64748b;
+  font-family: monospace;
+  font-size: 11px;
+}
+.map-layer-toggles {
+  display: flex;
+  gap: 12px;
+}
+.layer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+  cursor: pointer;
+}
+.layer-toggle input {
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+/* SVG 地图容器 */
+.svg-map-wrapper {
+  position: relative;
+  background: #0c121e;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.8), 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.vector-map-canvas {
+  width: 100%;
+  height: 460px;
+  display: block;
+}
+
+/* 动态动画 */
+.animated-route-path {
+  stroke-dasharray: 8, 5;
+  animation: dashFlow 20s linear infinite;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+@keyframes dashFlow {
+  from {
+    stroke-dashoffset: 400;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.pulsing-isochrone-ring {
+  animation: isochronePulse 3s ease-in-out infinite alternate;
+}
+@keyframes isochronePulse {
+  0% {
+    stroke-opacity: 0.5;
+    stroke-width: 1.2px;
+  }
+  100% {
+    stroke-opacity: 1;
+    stroke-width: 2.2px;
+  }
+}
+
+.beacon-pulse {
+  animation: beaconWave 2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+@keyframes beaconWave {
+  0% {
+    r: 12;
+    opacity: 0.8;
+  }
+  100% {
+    r: 26;
+    opacity: 0;
+  }
+}
+
+.gem-pulse {
+  animation: gemWave 2.5s ease-in-out infinite alternate;
+}
+@keyframes gemWave {
+  0% {
+    r: 16;
+    opacity: 0.4;
+  }
+  100% {
+    r: 28;
+    opacity: 0.9;
+  }
+}
+
+.map-node {
+  cursor: pointer;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.map-node:hover {
+  transform: scale(1.18);
+}
+.map-node-label {
+  pointer-events: none;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+.map-svg-label {
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+/* POI 详情浮层 */
+.poi-inspector-overlay {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 20;
+}
+.inspector-card {
+  padding: 12px 16px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+}
+.inspector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.inspector-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #f8fafc;
+}
+.badge-gem {
+  background: rgba(244, 114, 182, 0.25);
+  color: #f472b6;
+  border: 1px solid rgba(244, 114, 182, 0.5);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.badge-visited {
+  background: rgba(16, 185, 129, 0.25);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.btn-close-inspector {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+.btn-close-inspector:hover {
+  color: #f8fafc;
+}
+.inspector-reason {
+  font-size: 12px;
+  color: #fbcfe8;
+  margin-bottom: 6px;
+  background: rgba(244, 114, 182, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.inspector-meta-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.meta-tag {
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #cbd5e1;
+}
+
+/* Agent 地图调度记录 Feed */
+.map-action-feed-box {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.feed-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 8px;
+}
+.feed-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.feed-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 2px solid #38bdf8;
+}
+.feed-badge {
+  font-family: monospace;
+  font-weight: 600;
+  color: #7dd3fc;
+  white-space: nowrap;
+}
+.feed-detail {
+  flex: 1;
+  color: #cbd5e1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed-time {
+  font-size: 10px;
+  color: #64748b;
+  font-family: monospace;
+}
+.feed-empty {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  padding: 12px 0;
 }
 </style>
+
