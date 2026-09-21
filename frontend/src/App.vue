@@ -120,6 +120,9 @@
                 </div>
 
                 <div class="bubble-meta">
+                  <span v-if="msg.isInterrupted" class="badge-status-pill badge-stopped">⏹️ 已中途停止</span>
+                  <span v-if="msg.isSteered" class="badge-status-pill badge-steered">⚡ 已中途转向</span>
+                  <span v-if="msg.isSteeringAction" class="badge-status-pill badge-steering-prompt">⚡ 中途改口</span>
                   <span class="bubble-time">{{ msg.time }}</span>
                 </div>
               </div>
@@ -152,31 +155,43 @@
               v-for="(p, i) in quickPrompts"
               :key="i"
               class="btn-quick-chip"
-              :disabled="isStreaming"
               @click="applyQuickPrompt(p)"
             >
               {{ p }}
             </button>
           </div>
 
-          <!-- 输入区 -->
+          <!-- 输入区：支持中途抢占转向 (Mid-turn Steering) -->
           <div class="chat-input-area">
             <textarea
               v-model="inputQuery"
               class="chat-input"
               rows="2"
-              placeholder="输入旅行意图（如：我想去北京玩3天，预算5000元，必须去故宫，平时一直吃辣）..."
-              :disabled="isStreaming"
+              :placeholder="isStreaming ? '⚡ 正在流式规划中... 可随时输入新想法打断或改口！' : '输入旅行意图（如：我想去北京玩3天，预算5000元，必须去故宫，平时一直吃辣）...'"
               @keydown.enter.prevent="handleEnter"
             ></textarea>
-            <button
-              class="btn-send"
-              :disabled="isStreaming || !inputQuery.trim()"
-              @click="submitUserMessage"
-            >
-              <span v-if="isStreaming" class="loading-spin"></span>
-              <span v-else>发送 🚀</span>
-            </button>
+            <div class="input-actions-group">
+              <button
+                v-if="isStreaming"
+                class="btn-interrupt"
+                title="立即停止当前生成"
+                @click="interruptCurrentGeneration"
+              >
+                ⏹️ 停止生成
+              </button>
+              <button
+                class="btn-send"
+                :class="{ 'btn-steer': isStreaming && inputQuery.trim() }"
+                :disabled="!inputQuery.trim() && !isStreaming"
+                @click="submitUserMessage"
+              >
+                <span v-if="isStreaming && inputQuery.trim()">⚡ 抢占改口 🚀</span>
+                <span v-else-if="isStreaming">
+                  <span class="loading-spin"></span> 规划中...
+                </span>
+                <span v-else>发送 🚀</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -1213,6 +1228,7 @@ const mouseY = ref(0)
 
 const inputQuery = ref('')
 const isStreaming = ref(false)
+const activeAbortController = ref(null)
 const chatHistoryRef = ref(null)
 
 const messages = ref([
@@ -1487,18 +1503,54 @@ function scrollToBottom() {
   })
 }
 
-// ── 发送消息核心 (SSE Stream) ──
+// ── 发送消息核心 (SSE Stream，支持中途抢占与改口转向 Mid-turn Steering) ──
 async function sendChatRequest(text, actionPayload = null) {
-  if (isStreaming.value) return
+  const isSteering = isStreaming.value
+
+  // 若当前已有在途流式任务，立即执行客户端 Abort 并向后端协调器发送抢占中断信号
+  if (isSteering) {
+    if (activeAbortController.value) {
+      try {
+        activeAbortController.value.abort()
+      } catch (e) {
+        console.warn('Abort previous stream error:', e)
+      }
+      activeAbortController.value = null
+    }
+
+    // 异步向后端协调器广播打断信号
+    fetch('/api/session/interrupt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Id': userId.value,
+      },
+      body: JSON.stringify({
+        session_id: sessionId.value,
+        user_id: userId.value,
+        reason: 'steered_by_user',
+        steering_input: text || '',
+      }),
+    }).catch((e) => console.warn('Interrupt notification failed:', e))
+
+    // 标记上一条助手的流式消息为已中途转向
+    const lastAssistant = [...messages.value].reverse().find((m) => m.role === 'assistant')
+    if (lastAssistant) {
+      lastAssistant.isSteered = true
+      lastAssistant.isStreaming = false
+    }
+  }
+
   isStreaming.value = true
   currentThinking.value = []
 
-  // 1. 若为用户文字输入，推入对话气泡
+  // 1. 若为用户文字输入或动作，推入对话气泡
   if (text) {
     messages.value.push({
       id: Date.now(),
       role: 'user',
       content: text,
+      isSteeringAction: isSteering,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     })
   } else if (actionPayload) {
@@ -1521,10 +1573,15 @@ async function sendChatRequest(text, actionPayload = null) {
     clarification: null,
     isThinkingOpen: true,
     isStreaming: true,
+    isInterrupted: false,
+    isSteered: false,
     time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   })
   messages.value.push(assistantMsg)
   scrollToBottom()
+
+  const abortController = new AbortController()
+  activeAbortController.value = abortController
 
   try {
     const endpoint = '/api/session/chat'
@@ -1544,6 +1601,7 @@ async function sendChatRequest(text, actionPayload = null) {
         'X-User-Id': userId.value,
       },
       body: JSON.stringify(payload),
+      signal: abortController.signal,
     })
 
     if (!res.ok) {
@@ -1683,6 +1741,12 @@ async function sendChatRequest(text, actionPayload = null) {
           }
           saveSessionCache()
           fetchSessionState()
+        } else if (eventName === 'preempted') {
+          assistantMsg.isInterrupted = true
+          assistantMsg.isStreaming = false
+          const pDetail = parsed.detail || '⚡ 任务已响应中途改口抢占并安全交出执行权'
+          assistantMsg.thinking.push({ step: 'preempted', detail: pDetail })
+          scrollToBottom()
         } else if (eventName === 'done') {
           assistantMsg.isStreaming = false
           assistantMsg.isThinkingOpen = false
@@ -1691,14 +1755,64 @@ async function sendChatRequest(text, actionPayload = null) {
       }
     }
   } catch (err) {
-    console.error('SSE 流式接收异常:', err)
-    assistantMsg.content += `\n\n*(网络或接口异常: ${err.message})*`
-    assistantMsg.isStreaming = false
+    if (err.name === 'AbortError') {
+      console.log('前序规划流已被外部主动停止或抢占')
+      assistantMsg.isStreaming = false
+      assistantMsg.isInterrupted = true
+    } else {
+      console.error('SSE 流式接收异常:', err)
+      assistantMsg.content += `\n\n*(网络或接口异常: ${err.message})*`
+      assistantMsg.isStreaming = false
+    }
   } finally {
-    isStreaming.value = false
+    if (activeAbortController.value === abortController) {
+      activeAbortController.value = null
+      isStreaming.value = false
+    }
     saveSessionCache()
     scrollToBottom()
   }
+}
+
+// ── 用户主动打断当前流式生成 (Interrupt Current Generation) ──
+async function interruptCurrentGeneration() {
+  if (!isStreaming.value) return
+
+  if (activeAbortController.value) {
+    try {
+      activeAbortController.value.abort()
+    } catch (e) {
+      console.warn('Abort error:', e)
+    }
+    activeAbortController.value = null
+  }
+  isStreaming.value = false
+
+  const lastAssistant = [...messages.value].reverse().find((m) => m.role === 'assistant')
+  if (lastAssistant) {
+    lastAssistant.isInterrupted = true
+    lastAssistant.isStreaming = false
+    lastAssistant.thinking.push({ step: 'interrupted', detail: '⏹️ 用户已手动停止本次生成' })
+  }
+
+  try {
+    await fetch('/api/session/interrupt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Id': userId.value,
+      },
+      body: JSON.stringify({
+        session_id: sessionId.value,
+        user_id: userId.value,
+        reason: 'stopped_by_user',
+      }),
+    })
+  } catch (err) {
+    console.warn('发送停止请求失败:', err)
+  }
+  saveSessionCache()
+  scrollToBottom()
 }
 
 function submitUserMessage() {
@@ -2355,6 +2469,73 @@ onMounted(async () => {
 .btn-send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ── 中途打断与改口操作按钮群 (Mid-turn Steering & Preemption) ── */
+.input-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.btn-interrupt {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #fca5a5;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.btn-interrupt:hover {
+  background: rgba(239, 68, 68, 0.3);
+  color: #ffffff;
+  border-color: #ef4444;
+  transform: translateY(-1px);
+}
+.btn-send.btn-steer {
+  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.4);
+  animation: pulse-steer-glow 1.8s infinite;
+}
+@keyframes pulse-steer-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.7);
+  }
+}
+.badge-status-pill {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.badge-stopped {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+.badge-steered {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+.badge-steering-prompt {
+  background: rgba(168, 85, 247, 0.2);
+  color: #e9d5ff;
+  border: 1px solid rgba(168, 85, 247, 0.45);
 }
 
 /* ── 右栏：看板部分 ── */

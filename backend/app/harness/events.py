@@ -131,3 +131,17 @@ class TurnCompleteEvent(HarnessEvent):
             event_type="done",
             payload={"session_id": session_id, "success": success, "status": status}
         )
+
+
+@dataclass
+class PreemptedEvent(HarnessEvent):
+    """流式中途抢占与打断事件 (Mid-turn Steering & Preemption)"""
+    def __init__(self, session_id: str, reason: str = "steered_by_user", detail: str = ""):
+        super().__init__(
+            event_type="preempted",
+            payload={
+                "session_id": session_id,
+                "reason": reason,
+                "detail": detail or "用户发起中途改口，当前流式计算已安全抢占中断并清理上下文",
+            }
+        )

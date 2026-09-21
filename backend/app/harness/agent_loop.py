@@ -26,6 +26,7 @@ from .events import (
     MessageDeltaEvent,
     MapActionEvent,
     TurnCompleteEvent,
+    PreemptedEvent,
 )
 from .invariants import TravelInvariants
 from .registry import ToolRegistry, travel_tools
@@ -54,16 +55,27 @@ class TravelAgentHarness:
         current_requirements: EffectiveRequirements | None = None,
         action_type: str | None = None,
         action_payload: dict[str, Any] | None = None,
+        cancellation_token: asyncio.Event | None = None,
+        is_steering: bool = False,
     ) -> AsyncGenerator[HarnessEvent, None]:
-        """运行单轮 Harness 主循环 (产出强类型异步事件流)"""
+        """运行单轮 Harness 主循环 (产出强类型异步事件流，支持中途改口抢占与协作取消)"""
+        def _is_preempted() -> bool:
+            return bool(cancellation_token and cancellation_token.is_set())
+
+        if _is_preempted():
+            yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="任务启动前检测到抢占信号，安全退出")
+            return
+
         yield ThinkingEvent(step="init", detail=f"Harness 已接入会话 [{session_id}] (租户: {user_id})，解析用户意图...")
 
         # 若未直接传入 requirements，则从本地会话存储中恢复已有状态
+        prev_city = None
         if current_requirements is None:
             saved_snap = harness_session_store.get(session_id, user_id=user_id)
             if saved_snap.effective_requirements and "slots" in saved_snap.effective_requirements:
                 try:
                     current_requirements = EffectiveRequirements(**saved_snap.effective_requirements)
+                    prev_city = current_requirements.get_slot_value("city")
                 except Exception:
                     pass
 
@@ -82,6 +94,13 @@ class TravelAgentHarness:
             for extra_key in ("days", "city", "start_date"):
                 if extra_key in action_payload and extra_key != k:
                     req.set_slot(extra_key, action_payload[extra_key], origin=SlotOrigin.USER_EXPLICIT)
+
+        curr_city = req.get_slot_value("city")
+        if is_steering or (prev_city and curr_city and prev_city != curr_city):
+            yield ThinkingEvent(
+                step="midturn_steered",
+                detail=f"⚡ 检测到中途改口转向：已安全继承已有游玩天数与作息画像，正在原地热切换至【{curr_city}】..."
+            )
 
         # ── 主动澄清拦截：使用标准 check_clarification_needed 评估核心槽位完备性 ──
         clar_prompt = check_clarification_needed(req)
@@ -152,6 +171,10 @@ class TravelAgentHarness:
             yield ThinkingEvent(step="loop_turn", detail=f"进入调度主循环 (第 {turn} 轮)...")
 
             # ── Step 1: 高德返回真实人文/自然名胜 ──
+            if _is_preempted():
+                yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="检测到中途改口，已安全中断名胜检索")
+                return
+
             yield ToolStartEvent(tool_name="search_scenic_pois", arguments={"city": city, "preferences": scenic_prefs})
             raw_cands, dur_ms = await self.registry.call("search_scenic_pois", city=city, preferences=scenic_prefs)
             yield ToolEndEvent(tool_name="search_scenic_pois", result_summary=f"召回 {len(raw_cands or [])} 处有效名胜", duration_ms=dur_ms)
@@ -207,6 +230,10 @@ class TravelAgentHarness:
                         candidate_pool = filtered_pool
 
             # ── 探索拓展：发掘在地特色秘境与文化美学宝藏 (Pi Serendipity Engine) ──
+            if _is_preempted():
+                yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="检测到中途改口，已安全中断秘境发掘")
+                return
+
             raw_gems = []
             if self.registry.get_tool("discover_hidden_gems"):
                 yield ToolStartEvent(tool_name="discover_hidden_gems", arguments={"city": city})
@@ -247,6 +274,10 @@ class TravelAgentHarness:
                     })
 
             # ── Step 2: Agent 调用算法 (KMeans -> Minimax -> 2-Opt -> 三餐富化) ──
+            if _is_preempted():
+                yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="检测到中途改口，已安全中断空间聚类与算法调度")
+                return
+
             yield ToolStartEvent(tool_name="cluster_days_kmeans", arguments={"days": days, "poi_count": len(candidate_pool)})
             clusters, dur_ms = await self.registry.call("cluster_days_kmeans", pois=candidate_pool, days=days)
             yield ToolEndEvent(tool_name="cluster_days_kmeans", result_summary=f"聚类划分完成", duration_ms=dur_ms)
@@ -275,6 +306,10 @@ class TravelAgentHarness:
                 day_date = (base_date + timedelta(days=d_idx)).strftime("%Y-%m-%d")
                 c_info = clusters[d_idx] if d_idx < len(clusters) else {"pois": []}
                 day_pois = list(c_info.get("pois", []))
+
+                if _is_preempted():
+                    yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="检测到中途改口，已安全中断路径优化")
+                    return
 
                 yield ToolStartEvent(tool_name="solve_2opt_route", arguments={"day": d_idx + 1, "poi_count": len(day_pois)})
                 route_res, dur_ms = await self.registry.call("solve_2opt_route", pois=day_pois)
@@ -361,6 +396,10 @@ class TravelAgentHarness:
                 })
 
             # 三餐周边富化
+            if _is_preempted():
+                yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="检测到中途改口，已安全中断三餐匹配")
+                return
+
             yield ToolStartEvent(tool_name="enrich_meals", arguments={"food_preferences": food_prefs})
             enriched_days, dur_ms = await self.registry.call("enrich_meals", plan_days=plan_days, city=city, food_preferences=food_prefs)
             yield ToolEndEvent(tool_name="enrich_meals", result_summary=f"已为每天匹配高德 4.0+ 美食", duration_ms=dur_ms)
@@ -424,6 +463,10 @@ class TravelAgentHarness:
                 if not target_pois:
                     target_pois = core_poi_names[:2]
 
+                if _is_preempted():
+                    yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="检测到中途改口，已安全中断注意事项抓取")
+                    return
+
                 yield ToolStartEvent(tool_name="fetch_tavily_notes", arguments={"poi_count": len(target_pois), "pois": target_pois})
 
                 async def _fetch_one_guide(p_name: str):
@@ -477,6 +520,10 @@ class TravelAgentHarness:
                 if gt.get("tips"):
                     summary_md += f"   - 💡 *避坑贴士*: {gt['tips'][0]}\n"
         # ── Step 6: 状态原子持久化与流式广播 ──
+        if _is_preempted():
+            yield PreemptedEvent(session_id=session_id, reason="steered_by_user", detail="检测到中途改口，已中止状态写入以防脑裂覆盖")
+            return
+
         harness_session_store.update(
             session_id=session_id,
             user_id=user_id,
