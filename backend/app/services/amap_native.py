@@ -79,7 +79,7 @@ class AmapNativeClient:
                 "level": geo.get("level"),
             })
         res = {"return": results}
-        self._cache.set("maps_geo", fp, res, ttl=86400 * 7)
+        self._cache.set("maps_geo", fp, res, ttl=86400 * 90)
         return res
 
     def maps_regeocode(self, location: str) -> Dict[str, Any]:
@@ -99,7 +99,7 @@ class AmapNativeClient:
             "formatted_address": regeocode.get("formatted_address"),
             "addressComponent": regeocode.get("addressComponent"),
         }
-        self._cache.set("maps_regeocode", fp, res, ttl=86400 * 7)
+        self._cache.set("maps_regeocode", fp, res, ttl=86400 * 90)
         return res
 
     def maps_ip_location(self, ip: str) -> Dict[str, Any]:
@@ -135,7 +135,7 @@ class AmapNativeClient:
             "city": forecasts[0].get("city", city),
             "forecasts": forecasts[0].get("casts", []),
         }
-        self._cache.set("maps_weather", fp, res, ttl=1800)
+        self._cache.set("maps_weather", fp, res, ttl=86400)
         return res
 
     def maps_distance(self, origins: str, destination: str, type: str = "1") -> Dict[str, Any]:
@@ -159,7 +159,7 @@ class AmapNativeClient:
                 "duration": result.get("duration"),
             })
         res = {"results": results}
-        self._cache.set("maps_distance", fp, res, ttl=86400 * 7)
+        self._cache.set("maps_distance", fp, res, ttl=86400 * 90)
         return res
 
     def maps_text_search(self, keywords: str, city: str = "", citylimit: str = "false") -> Dict[str, Any]:
@@ -217,12 +217,19 @@ class AmapNativeClient:
             },
             "pois": pois,
         }
-        self._cache.set("maps_text_search", fp, res, ttl=86400)
+        self._cache.set("maps_text_search", fp, res, ttl=86400 * 30)
         return res
 
     def maps_around_search(self, location: str, radius: str = "1000", keywords: str = "") -> Dict[str, Any]:
         """周边 POI 搜索 (美食/酒店/生活设施)"""
-        fp = compute_fingerprint({"location": location, "radius": str(radius), "keywords": keywords})
+        loc_normalized = location
+        if "," in location:
+            try:
+                p_lng, p_lat = (float(v) for v in location.split(","))
+                loc_normalized = f"{round(p_lng, 4)},{round(p_lat, 4)}"
+            except Exception:
+                pass
+        fp = compute_fingerprint({"location": loc_normalized, "radius": str(radius), "keywords": keywords})
         cached = self._cache.get("maps_around_search", fp)
         if cached is not None:
             return cached
@@ -264,7 +271,7 @@ class AmapNativeClient:
             pois.append(p_dict)
 
         res = {"pois": pois}
-        self._cache.set("maps_around_search", fp, res, ttl=86400)
+        self._cache.set("maps_around_search", fp, res, ttl=86400 * 30)
         return res
 
     def maps_search_detail(self, id: str) -> Dict[str, Any]:
@@ -301,32 +308,53 @@ class AmapNativeClient:
         if poi.get("biz_ext"):
             result.update(poi["biz_ext"])
 
-        self._cache.set("maps_search_detail", fp, result, ttl=86400 * 7)
+        self._cache.set("maps_search_detail", fp, result, ttl=86400 * 90)
         return result
 
     def maps_direction_driving_by_coordinates(self, origin: str, destination: str) -> Dict[str, Any]:
         """坐标驾车路径规划"""
+        fp = compute_fingerprint({"origin": origin, "destination": destination})
+        cached = self._cache.get("maps_direction_driving", fp)
+        if cached is not None:
+            return cached
+
         params = {"key": self.api_key, "origin": origin, "destination": destination}
         data = self._get("/v3/direction/driving", params=params)
         if data.get("status") != "1":
             return {"error": f"Driving route failed: {data.get('info') or data.get('infocode')}"}
-        return data.get("route", {})
+        res = data.get("route", {})
+        self._cache.set("maps_direction_driving", fp, res, ttl=86400 * 30)
+        return res
 
     def maps_direction_walking_by_coordinates(self, origin: str, destination: str) -> Dict[str, Any]:
         """坐标步行路径规划"""
+        fp = compute_fingerprint({"origin": origin, "destination": destination})
+        cached = self._cache.get("maps_direction_walking", fp)
+        if cached is not None:
+            return cached
+
         params = {"key": self.api_key, "origin": origin, "destination": destination}
         data = self._get("/v3/direction/walking", params=params)
         if data.get("status") != "1":
             return {"error": f"Walking route failed: {data.get('info') or data.get('infocode')}"}
-        return data.get("route", {})
+        res = data.get("route", {})
+        self._cache.set("maps_direction_walking", fp, res, ttl=86400 * 30)
+        return res
 
     def maps_bicycling_by_coordinates(self, origin_coordinates: str, destination_coordinates: str) -> Dict[str, Any]:
         """坐标骑行路径规划"""
+        fp = compute_fingerprint({"origin": origin_coordinates, "destination": destination_coordinates})
+        cached = self._cache.get("maps_direction_bicycling", fp)
+        if cached is not None:
+            return cached
+
         params = {"key": self.api_key, "origin": origin_coordinates, "destination": destination_coordinates}
         data = self._get("/v4/direction/bicycling", params=params)
         if data.get("errcode") != 0 and data.get("status") != "1":
             return {"error": f"Bicycling route failed: {data.get('errmsg') or data.get('info')}"}
-        return data.get("data", {})
+        res = data.get("data", {})
+        self._cache.set("maps_direction_bicycling", fp, res, ttl=86400 * 30)
+        return res
 
     def maps_direction_driving_by_address(
         self, origin_address: str, destination_address: str,
@@ -371,11 +399,18 @@ class AmapNativeClient:
         self, origin: str, destination: str, city: str, cityd: str
     ) -> Dict[str, Any]:
         """坐标公交综合路径规划"""
+        fp = compute_fingerprint({"origin": origin, "destination": destination, "city": city, "cityd": cityd})
+        cached = self._cache.get("maps_direction_transit", fp)
+        if cached is not None:
+            return cached
+
         params = {"key": self.api_key, "origin": origin, "destination": destination, "city": city, "cityd": cityd}
         data = self._get("/v3/direction/transit/integrated", params=params)
         if data.get("status") != "1":
             return {"error": f"Transit route failed: {data.get('info') or data.get('infocode')}"}
-        return data.get("route", {})
+        res = data.get("route", {})
+        self._cache.set("maps_direction_transit", fp, res, ttl=86400 * 30)
+        return res
 
     def maps_direction_transit_integrated_by_address(
         self, origin_address: str, destination_address: str, origin_city: str, destination_city: str

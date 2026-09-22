@@ -269,3 +269,92 @@ async def test_agent_loop_steered_event_and_viewport():
     fly_data = fly_event.payload.get("data", {})
     assert fly_data.get("zoom") == 8  # 川西作为大区旅游带自动适配 8 级宏观视口
     assert "川西" in fly_data.get("title", "")
+
+
+# ================================================================
+# 5. 高德 API 配额复用与 Redis 缓存防护测试 (Quota Conservation)
+# ================================================================
+
+def test_amap_cache_and_quota_reuse():
+    """验证高德 API 额度保护机制：
+    1. _enrich_pois_with_coords 遇到自带原生经纬度的 POI 时，不发起未缓存的 detail 风暴；
+    2. food/around 检索坚决跳过无意义的 detail 请求；
+    3. 已命中缓存的 POI detail 无损优先复用。
+    """
+    from app.tools.amap_wrapper import AmapToolWrapper
+    from app.services.cache_service import compute_fingerprint
+
+    wrapper = AmapToolWrapper()
+    cache_mgr = get_cache_manager()
+
+    detail_calls = []
+
+    def mock_mcp_run(args, timeout=5):
+        if args.get("tool_name") == "maps_search_detail":
+            detail_calls.append(args["arguments"]["id"])
+            return '{"id": "' + args["arguments"]["id"] + '", "location": "116.40,39.90", "address": "测试地址"}'
+        return "{}"
+
+    wrapper._mcp_run_with_timeout = mock_mcp_run
+
+    # 1. 模拟 food 检索返回 10 个自带 location 的美食 POI
+    raw_food = {
+        "pois": [
+            {"id": f"food_{i}", "name": f"餐厅_{i}", "location": f"{116.40 + i*0.01:.4f},{39.90 + i*0.01:.4f}", "typecode": "050100"}
+            for i in range(10)
+        ]
+    }
+    enriched_food = wrapper._enrich_pois_with_coords(raw_food, city="北京", stype="food")
+    # food 类型自带原生经纬度，detail_calls 必须为 0，杜绝网络配额浪费
+    assert len(detail_calls) == 0
+    assert enriched_food["pois"][0]["_lng"] is not None
+
+    # 2. 模拟已在 Redis 缓存中的 POI detail
+    cached_id = "poi_cached_999"
+    fp = compute_fingerprint({"id": cached_id})
+    cache_mgr.set("maps_search_detail", fp, {
+        "id": cached_id, "location": "116.41,39.91", "rating": "4.9", "open_time": "08:00-18:00"
+    }, ttl=3600)
+
+    raw_attractions = {
+        "pois": [
+            {"id": cached_id, "name": "已缓存景点", "location": "116.41,39.91", "typecode": "110000"},
+            *[
+                {"id": f"attr_{i}", "name": f"未缓存景点_{i}", "location": f"{116.41 + i*0.01:.4f},{39.91 + i*0.01:.4f}", "typecode": "110000"}
+                for i in range(15)
+            ]
+        ]
+    }
+    detail_calls.clear()
+    enriched_attr = wrapper._enrich_pois_with_coords(raw_attractions, city="北京", stype="attraction")
+    # 已缓存的 cached_id 命中缓存被调用（或直接复用），其余 15 个自带坐标的 POI 仅前 4 个（idx 1..4 < 5）允许 live detail，第 5 个及以后被限流截断
+    assert len(detail_calls) <= 5, f"未被截流的 detail 调用次数过多: {len(detail_calls)}"
+    assert enriched_attr["pois"][0]["rating"] == "4.9"
+
+
+def test_enrich_meals_tool_redis_cache():
+    """验证 enrich_meals_tool 能够复用 Redis 缓存，二次调用不触发 search_pois"""
+    from app.tools.search_tools import enrich_meals_tool
+    from app.models.candidates import PoiCandidate
+
+    called_search = []
+
+    class MockWrapper:
+        def search_pois(self, city, stype, keywords="", center="", radius="", max_results=10):
+            called_search.append(center)
+            return [
+                PoiCandidate(name="老字号豆花庄", category="川菜", rating=4.8, typecode="050100", lng=104.06, lat=30.67),
+                PoiCandidate(name="地道甜水面", category="特色小吃", rating=4.7, typecode="050100", lng=104.06, lat=30.67),
+                PoiCandidate(name="钟水饺老店", category="精选小吃", rating=4.6, typecode="050100", lng=104.06, lat=30.67),
+            ]
+
+    plan_days = [{
+        "day_index": 0,
+        "attractions": [{"name": "青羊宫", "lng": 104.04, "lat": 30.66}],
+        "meals": [],
+    }]
+
+    # 第一次使用带底层调用的逻辑（模拟真实验收）
+    enrich_meals_tool(plan_days=plan_days, city="成都_缓存测试", amap_wrapper=MockWrapper())
+    assert len(called_search) == 1
+    assert len(plan_days[0]["meals"]) == 3

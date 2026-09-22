@@ -12,6 +12,7 @@ from typing import Any
 
 from ..models.candidates import PoiCandidate, HotelCandidate
 from ..services.amap_service import geo_cached
+from ..services.cache_service import compute_fingerprint, get_cache_manager
 from .amap_wrapper import AmapToolWrapper
 from .cache_decorator import cached_tool_result
 
@@ -382,7 +383,7 @@ def _fetch_attractions(
     return candidates
 
 
-@cached_tool_result("search_attractions", key_builder=make_attractions_cache_key, ttl=604800)
+@cached_tool_result("search_attractions", key_builder=make_attractions_cache_key, ttl=86400 * 30)
 def _cached_search_attractions(
     city: str,
     preferences: list[str] | None = None,
@@ -598,7 +599,7 @@ def _search_hotel_minimax_impl(
         }
 
 
-@cached_tool_result("search_hotel_minimax", key_builder=make_hotel_cache_key, ttl=604800)
+@cached_tool_result("search_hotel_minimax", key_builder=make_hotel_cache_key, ttl=86400 * 30)
 def _cached_search_hotel_minimax(
     city: str,
     attraction_coords: list[dict[str, Any]],
@@ -727,6 +728,25 @@ def enrich_meals_tool(
         if not lng or not lat:
             continue
 
+        # 优先尝试命中当天美食指纹缓存 (若非显式传入 mock wrapper)
+        meal_cache_key = ""
+        if amap_wrapper is None:
+            try:
+                cache_mgr = get_cache_manager()
+                meal_cache_key = compute_fingerprint({
+                    "city": city,
+                    "lng": round(float(lng), 4),
+                    "lat": round(float(lat), 4),
+                    "kw": food_kw,
+                    "d_idx": d_idx,
+                })
+                cached_meals = cache_mgr.get("enrich_day_meals", meal_cache_key)
+                if cached_meals and isinstance(cached_meals, list) and len(cached_meals) == 3:
+                    d["meals"] = cached_meals
+                    continue
+            except Exception:
+                pass
+
         candidates_found: list[dict[str, Any]] = []
         try:
             raw_foods = wrapper.search_pois(city, "food", food_kw, f"{lng},{lat}", "")
@@ -799,6 +819,13 @@ def enrich_meals_tool(
                 fb["source"] = "amap"
                 final_meals.append(fb)
         d["meals"] = final_meals
+
+        # 写入 30 天 Redis 指纹缓存
+        if amap_wrapper is None and meal_cache_key:
+            try:
+                get_cache_manager().set("enrich_day_meals", meal_cache_key, final_meals, ttl=86400 * 30)
+            except Exception:
+                pass
 
     return plan_days
 

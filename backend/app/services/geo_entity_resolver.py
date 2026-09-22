@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
-from .cache_service import get_cache_manager
+from .cache_service import get_cache_manager, compute_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class ResolvedDestination:
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["dest_type"] = self.dest_type.value
+        d["center_coord"] = list(self.center_coord)
         return d
 
     @classmethod
@@ -59,7 +60,13 @@ class ResolvedDestination:
 
 
 def _amap_geocode_lookup(name: str) -> dict[str, Any] | None:
-    """通道 A: 调用高德官方 Geocoding API 进行确定性行政层级判定"""
+    """通道 A: 调用高德官方 Geocoding API 进行确定性行政层级判定 (优先命中 Redis 指纹缓存)"""
+    cache_mgr = get_cache_manager()
+    fp = compute_fingerprint({"address": name, "city": ""})
+    cached = cache_mgr.get("maps_geo", fp)
+    if cached and isinstance(cached, dict) and cached.get("return"):
+        return cached["return"][0]
+
     api_key = os.getenv("AMAP_API_KEY")
     if not api_key:
         return None
@@ -71,6 +78,10 @@ def _amap_geocode_lookup(name: str) -> dict[str, Any] | None:
             data = json.loads(resp.read().decode("utf-8"))
             geocodes = data.get("geocodes", [])
             if geocodes:
+                try:
+                    cache_mgr.set("maps_geo", fp, {"return": geocodes}, ttl=86400 * 90)
+                except Exception:
+                    pass
                 return geocodes[0]
     except Exception as e:
         logger.debug("高德 Geocoding 解析 [%s] 降级: %s", name, e)
