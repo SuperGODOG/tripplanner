@@ -3,10 +3,16 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from ..config import get_settings
+from ..config import get_settings, Settings
 from .trip import router as trip_router
+from .session import router as session_router
+from .harness_api import router as harness_router
+from .user import router as user_router
 
-settings = get_settings()
+try:
+    settings = get_settings()
+except Exception:
+    settings = Settings(llm_api_key="mock_key_for_test")
 
 app = FastAPI(
     title="TripPlanner",
@@ -24,6 +30,9 @@ app.add_middleware(
 )
 
 app.include_router(trip_router)
+app.include_router(session_router)
+app.include_router(harness_router)
+app.include_router(user_router)
 
 # 静态文件（前端 MVP）
 static_dir = Path(__file__).parent.parent.parent / "static"

@@ -13,10 +13,51 @@
 """
 import json
 import os
+import re
 from datetime import datetime
 from collections import Counter
+from typing import Any
 from .models import MemoryEntry
 from .classifier import classify, extract_tags, DOMAIN_WEIGHTS
+from ..models.session import RequirementSlot, SlotOrigin, PreferenceScope
+
+# 持久性意图副词正则 (匹配显式持久偏好，防记忆污染)
+PERSISTENT_ADVERB_PATTERN = re.compile(r"(平时|一直|总是|每次都|习惯|素来|长年)")
+
+
+def is_persistent_preference(text: str) -> bool:
+    """判定输入文本中是否包含持久性副词（用于防记忆污染）"""
+    return bool(PERSISTENT_ADVERB_PATTERN.search(text))
+
+
+def resolve_effective_slot(
+    slot_name: str,
+    trip_slots: dict[str, RequirementSlot],
+    long_term_profile: dict[str, Any],
+    default_val: Any = None
+) -> tuple[Any, SlotOrigin, PreferenceScope]:
+    """四级优先级解析器: 本次显式指定 > 本次行程需求 > 长期历史画像 > 默认值"""
+    # 1. 本次显式指定 (USER_EXPLICIT)
+    if slot_name in trip_slots:
+        slot = trip_slots[slot_name]
+        if slot.origin == SlotOrigin.USER_EXPLICIT:
+            return slot.value, SlotOrigin.USER_EXPLICIT, slot.scope
+
+    # 2. 本次推断的单次需求 (MODEL_INFERRED)
+    if slot_name in trip_slots:
+        slot = trip_slots[slot_name]
+        if slot.origin == SlotOrigin.MODEL_INFERRED:
+            return slot.value, SlotOrigin.MODEL_INFERRED, slot.scope
+
+    # 3. 长期历史画像 (来自 SQLite 长期库)
+    if slot_name in long_term_profile:
+        val = long_term_profile[slot_name]
+        if val is not None and val != "" and val != []:
+            return val, SlotOrigin.MODEL_INFERRED, PreferenceScope.LONG_TERM_USER
+
+    # 4. 默认兜底值
+    return default_val, SlotOrigin.DEFAULT_VALUE, PreferenceScope.SYSTEM_DEFAULT
+
 
 
 class MemoryManager:
@@ -108,6 +149,23 @@ class MemoryManager:
         self._save()
 
         return entry
+
+    def record_user_preference(
+        self,
+        text: str,
+        interaction_type: str = "observe",
+        force_long_term: bool = False
+    ) -> tuple[MemoryEntry | None, bool]:
+        """防记忆污染门控写入
+
+        只有当 force_long_term=True 或文本包含持久副词时，才沉淀进全局长期记忆。
+        单次行程的临时消费与临时诉求返回 (None, False)，杜绝长期记忆污染。
+        """
+        is_persistent = force_long_term or is_persistent_preference(text)
+        if not is_persistent:
+            return None, False
+        entry = self.add(text, interaction_type)
+        return entry, True
 
     def get_profile(self) -> dict:
         """

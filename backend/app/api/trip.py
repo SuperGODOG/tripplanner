@@ -13,14 +13,14 @@ from ..memory.repository import get_memory_repository
 router = APIRouter(prefix="/api", tags=["trip"])
 
 
-@router.get("/profile")
+@router.get("/profile", deprecated=True, summary="[已废弃] 获取用户画像 (建议使用会话记忆系统)")
 async def get_profile(user_id: UUID):
     trip_count, profile = get_memory_repository().get_profile(str(user_id))
     return {"trip_count": trip_count, "ready": trip_count >= 5,
             "profile": profile if trip_count >= 5 else {}}
 
 
-@router.post("/trip", response_model=TripPlan)
+@router.post("/trip", response_model=TripPlan, deprecated=True, summary="[已废弃] 批处理生成行程 (建议使用 /api/session/chat)")
 async def plan_trip(request: TripRequest):
     try:
         start = request.start_date or date.today().isoformat()
@@ -71,7 +71,7 @@ async def plan_trip(request: TripRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/trip/stream")
+@router.get("/trip/stream", deprecated=True, summary="[已废弃] SSE 流式生成行程 (建议使用 /api/session/chat)")
 async def plan_trip_stream(
     city: str, user_id: UUID, days: int = Query(3, ge=1, le=14),
     origin: str = "", start_date: str = "",

@@ -1,0 +1,2182 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="基于 LangGraph + ReAct 自研编排的多智能体旅行规划系统 | 5 Node StateGraph · MCP · 五因子权重 · 双轨异常检测">
+      
+      
+      
+        <link rel="canonical" href="https://supergodog.github.io/tripplanner/PROJECT/">
+      
+      
+        <link rel="prev" href="../CLAUDE/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>TripPlanner 项目文档 - Tripplanner · SuperGODOG</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tripplanner" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href=".." title="Tripplanner · SuperGODOG" class="md-header__button md-logo" aria-label="Tripplanner · SuperGODOG" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tripplanner · SuperGODOG
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              TripPlanner 项目文档
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/SuperGODOG/tripplanner" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tripplanner
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tripplanner · SuperGODOG" class="md-nav__button md-logo" aria-label="Tripplanner · SuperGODOG" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Tripplanner · SuperGODOG
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/SuperGODOG/tripplanner" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tripplanner
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🧳 TripPlanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TripPlanner — 全套架构图 (Mermaid)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CLAUDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TripPlanner Project
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TripPlanner 项目文档
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TripPlanner 项目文档
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一、项目总览
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="一、项目总览">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 一句话描述
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 技术栈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 架构层级
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.4 项目结构
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-1-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        二、Phase 1: 环境搭建与 MCP 集成
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="二、Phase 1: 环境搭建与 MCP 集成">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-2-4-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三、Phase 2: 4 Agent 定义
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="三、Phase 2: 4 Agent 定义">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-3-langgraph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        四、Phase 3: LangGraph 图编排
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="四、Phase 3: LangGraph 图编排">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-interrupt-200" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Interrupt 容错升级（~200 行新增，零删除）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-4-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 4 Node 分工详表
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-4-tool-wrapper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        五、Phase 4: 本地 Tool 与 Wrapper 模式
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="五、Phase 4: 本地 Tool 与 Wrapper 模式">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-5-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        六、Phase 5: API 层增强 — 天气查询 + 城际交通预处理 + 景点坐标增强
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="六、Phase 5: API 层增强 — 天气查询 + 城际交通预处理 + 景点坐标增强">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 三层分离（保持）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-6-hotel_retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        七、Phase 6: 记忆模块（双轨异常检测 + 多维度画像）+ 离群检测 + hotel_retry 上限
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="七、Phase 6: 记忆模块（双轨异常检测 + 多维度画像）+ 离群检测 + hotel_retry 上限">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 五因子权重公式（保持）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 面试讲述要点
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        八、Phase 7: 前端交互设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="八、Phase 7: 前端交互设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        九、端到端流程
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一、项目总览
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="一、项目总览">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 一句话描述
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 技术栈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 架构层级
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.4 项目结构
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-1-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        二、Phase 1: 环境搭建与 MCP 集成
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="二、Phase 1: 环境搭建与 MCP 集成">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-2-4-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三、Phase 2: 4 Agent 定义
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="三、Phase 2: 4 Agent 定义">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-3-langgraph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        四、Phase 3: LangGraph 图编排
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="四、Phase 3: LangGraph 图编排">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-interrupt-200" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Interrupt 容错升级（~200 行新增，零删除）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-4-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 4 Node 分工详表
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-4-tool-wrapper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        五、Phase 4: 本地 Tool 与 Wrapper 模式
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="五、Phase 4: 本地 Tool 与 Wrapper 模式">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-5-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        六、Phase 5: API 层增强 — 天气查询 + 城际交通预处理 + 景点坐标增强
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="六、Phase 5: API 层增强 — 天气查询 + 城际交通预处理 + 景点坐标增强">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 三层分离（保持）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-6-hotel_retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        七、Phase 6: 记忆模块（双轨异常检测 + 多维度画像）+ 离群检测 + hotel_retry 上限
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="七、Phase 6: 记忆模块（双轨异常检测 + 多维度画像）+ 离群检测 + hotel_retry 上限">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 五因子权重公式（保持）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 面试讲述要点
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        八、Phase 7: 前端交互设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="八、Phase 7: 前端交互设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 做了什么
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 关键设计决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        九、端到端流程
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="tripplanner">TripPlanner 项目文档</h1>
+<blockquote>
+<p>Multi-Agent Trip Planner — 基于 LangGraph + HelloAgents + MCP 的多智能体旅行规划系统</p>
+</blockquote>
+<hr />
+<h2 id="_1">一、项目总览</h2>
+<h3 id="11">1.1 一句话描述</h3>
+<p>4 个 Node 的 LangGraph 图编排 + MCP 协议调高德地图 + API 层天气/城际交通预处理 + 双轨异常检测画像，零人工介入完成"输入城市→输出个性化多城行程"。</p>
+<h3 id="12">1.2 技术栈</h3>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>选型</th>
+<th>定位</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>编排引擎</td>
+<td>LangGraph StateGraph</td>
+<td>第 4-5 层：图编排 + 多智能体</td>
+</tr>
+<tr>
+<td>Agent 框架</td>
+<td>HelloAgents SimpleAgent</td>
+<td>第 3 层：ReAct 循环封装</td>
+</tr>
+<tr>
+<td>工具协议</td>
+<td>MCP (amap-mcp-server)</td>
+<td>远程工具标准化</td>
+</tr>
+<tr>
+<td>LLM</td>
+<td>DeepSeek (via HelloAgentsLLM)</td>
+<td>第 1 层：裸 API 调用</td>
+</tr>
+<tr>
+<td>Web 框架</td>
+<td>FastAPI + Pydantic</td>
+<td>REST API + 类型校验</td>
+</tr>
+<tr>
+<td>记忆</td>
+<td>自定义五因子权重模块</td>
+<td>用户画像持久化</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13">1.3 架构层级</h3>
+<pre><code>第 6 层  API 层预处理       ← 天气 _fetch_weather() + 城际交通 _compute_intercity() + 日期 _compute_dates()
+第 5 层  多智能体编排       ← TripPlanner LangGraph（4 Node，仅市内数据 + Conditional Edge）
+第 4 层  图编排框架         ← LangGraph StateGraph（Node/Edge/Conditional/Checkpoint）
+第 3 层  框架封装           ← HelloAgents SimpleAgent/ToolRegistry
+第 2 层  Agent 内循环       ← ReAct（Error-as-Observation 在此层）
+第 1 层  裸 LLM 调用        ← HelloAgentsLLM.invoke()
+</code></pre>
+<h3 id="14">1.4 项目结构</h3>
+<pre><code>backend/
+├── app/
+│   ├── config.py              # 配置管理（pydantic-settings + .env）
+│   ├── agents/
+│   │   └── trip_planner_agent.py  # 4 个 SimpleAgent
+│   ├── services/
+│   │   ├── amap_service.py        # MCPTool 连接（单例）
+│   │   └── llm_service.py         # HelloAgentsLLM（单例）
+│   ├── tools/
+│   │   ├── amap_wrapper.py        # MCPTool 包装器（3 层: MCP→Format→Validate）
+│   │   ├── fallback.py            # 降级工具
+│   │   └── intercity.py           # 城际交通计算（API 层 _compute_intercity）
+│   ├── graph/
+│   │   ├── state.py               # TripPlannerState（Annotated[list, add] error_log）
+│   │   ├── nodes.py               # 4 个 Node 函数（attraction/hotel/memory/planner + 离群检测）
+│   │   └── builder.py             # StateGraph 构建（Conditional Edge: retry_planner/retry_hotel/done）
+│   ├── models/
+│   │   ├── schemas.py             # Pydantic 请求/响应模型
+│   │   └── transport.py           # IntercityTransport 模型
+│   ├── memory/
+│   │   ├── models.py              # MemoryEntry（五因子权重）
+│   │   ├── classifier.py          # 领域分类 + 标签提取
+│   │   ├── anomaly.py             # 双轨异常检测（IQR + 频率比）
+│   │   └── manager.py             # 记忆管理（trip_count 阈值 + 画像渐进构建）
+│   └── api/
+│       ├── main.py                # FastAPI 应用
+│       └── trip.py                # POST /api/trip（含 _compute_dates 预处理）
+├── frontend/                      # 前端（6 维度标签 + 降级面板 + 画像雷达图）
+├── data/
+│   └── memory.json                # 记忆持久化
+├── .env / .env.example
+├── requirements.txt
+└── run.py
+</code></pre>
+<hr />
+<h2 id="phase-1-mcp">二、Phase 1: 环境搭建与 MCP 集成</h2>
+<h3 id="21">2.1 做了什么</h3>
+<ul>
+<li>创建 Python 项目骨架（venv + <code>__init__.py</code> + 目录结构）</li>
+<li>安装依赖（hello-agents, langgraph, fastapi, fastmcp 等）</li>
+<li>配置 pydantic-settings 管理 API Key</li>
+<li>通过 MCPTool 连接 amap-mcp-server，验证 16 个可用工具</li>
+</ul>
+<h3 id="22">2.2 关键设计决策</h3>
+<p><strong>为什么用 pydantic-settings 而非 os.getenv()？</strong></p>
+<pre><code class="language-python">class Settings(BaseSettings):
+    llm_api_key: str
+    port: int = 8000       # 类型校验：写错成 &quot;八千&quot; 会在启动时报错
+    class Config:
+        env_file = &quot;.env&quot;  # 自动从文件读取，不用手动 load_dotenv()
+</code></pre>
+<p><code>os.getenv()</code> 返回 Optional[str]，每次都要写 <code>int(os.getenv("PORT", "8000"))</code>。pydantic-settings 自动做类型转换 + 校验。</p>
+<p><strong>MCPTool 的实际工作原理：</strong></p>
+<pre><code class="language-python">MCPTool(
+    server_command=[&quot;uvx&quot;, &quot;amap-mcp-server&quot;],  # 启动子进程
+    env={&quot;AMAP_MAPS_API_KEY&quot;: key},             # 环境变量传给子进程
+    auto_expand=True,                           # 自动展开子进程提供的工具
+)
+</code></pre>
+<p>每次 <code>mcp_tool.run(...)</code> 的底层流程：
+1. 序列化参数为 JSON
+2. 通过 stdin 发送 JSON-RPC 请求给子进程
+3. 子进程调用高德 HTTP API
+4. 子进程通过 stdout 返回 JSON-RPC 响应
+5. 父进程解析结果</p>
+<p><strong>amap-mcp-server 提供的 16 个工具</strong>：maps_text_search, maps_weather, maps_geo, maps_regeocode, maps_distance, maps_bicycling, maps_direction_walking/driving/transit 等。</p>
+<hr />
+<h2 id="phase-2-4-agent">三、Phase 2: 4 Agent 定义</h2>
+<h3 id="31">3.1 做了什么</h3>
+<ul>
+<li>定义 4 个 SimpleAgent 的 Prompt（景点/天气/酒店/规划）</li>
+<li>3 个工具型 Agent 共用同一个 MCPTool 实例</li>
+<li>Planner Agent 不需要工具（纯 LLM 推理）</li>
+<li>顺序编排验证 4 Agent 协作</li>
+</ul>
+<h3 id="32">3.2 关键设计决策</h3>
+<p><strong>为什么 Agent 1-3 有工具，Agent 4 没有？</strong></p>
+<p>Agent 1-3 是<strong>感知型 Agent</strong>——它们的任务是"获取外部数据"。Agent 4 是<strong>推理型 Agent</strong>——它的任务是"理解和重组已有数据"。给 Planner 加工具反而让它分心。</p>
+<p><strong>为什么 4 个 Agent 共享 MCPTool？</strong></p>
+<p>每个 MCPTool 实例启动一个 amap-mcp-server 子进程（~500ms 握手）。4 个 Agent 各建一个 = 4 个子进程 = 2 秒启动。共享 = 1 个子进程 = 0.5 秒启动。HelloAgents 框架在每次调用时带 session_id 区分来源，不会混淆。</p>
+<p><strong>ReAct 循环（每个 Agent 内部）：</strong></p>
+<pre><code>Thought: &quot;用户要我搜景点，我需要调工具&quot;
+Action:  [TOOL_CALL:amap_maps_text_search:keywords=景点,city=北京]
+Observation: {天安门广场, 故宫, 颐和园...}
+Thought: &quot;拿到结果了，整理回复&quot;
+→ 循环结束
+</code></pre>
+<p>Agent 在每轮决定"要不要继续调工具"——如果 Observation 不够好，它可以继续调（多轮 ReAct）。</p>
+<hr />
+<h2 id="phase-3-langgraph">四、Phase 3: LangGraph 图编排</h2>
+<h3 id="41">4.1 做了什么</h3>
+<ul>
+<li>定义 TripPlannerState（TypedDict）</li>
+<li>将 3 个 Agent 封装为 <strong>4 个 Node 函数</strong>（3 个 Agent + memory Node）</li>
+<li>构建 StateGraph + Conditional Edge + 编译</li>
+<li><code>graph.invoke(state)</code> 一行替代 Phase 2 的手动顺序调用</li>
+<li><strong>天气查询已从图 Node 移至 API 层预处理</strong>（<code>_fetch_weather()</code>），图内仅处理市内数据</li>
+<li><strong>Conditional Edge</strong>: planner 后根据校验结果路由到 <code>retry_planner</code> / <code>retry_hotel</code> / <code>done</code></li>
+</ul>
+<h3 id="42">4.2 关键设计决策</h3>
+<p><strong>为什么用 LangGraph 而非手写 while 循环？</strong></p>
+<p>手写 while 能串联 Agent，但 LangGraph 提供三样东西：</p>
+<ol>
+<li><strong>声明式图定义</strong>：加一个 Node 只需 <code>add_node</code> + <code>add_edge</code>，不改现有代码</li>
+<li><strong>Checkpoint 持久化</strong>：每步自动保存 State 快照。中断后相同 thread_id 继续——不重跑已完成的 Node</li>
+<li><strong>Conditional Edge</strong>：Node 失败时自动路由到降级路径</li>
+</ol>
+<p><strong>State 的 partial update 机制：</strong></p>
+<pre><code class="language-python">def attraction_node(state):
+    return {&quot;attraction_data&quot;: result, &quot;attraction_status&quot;: &quot;success&quot;}
+    # 只返回要修改的字段，LangGraph 自动 merge 回全局 State
+</code></pre>
+<p><strong>图级 Conditional Routing vs Agent 级 Error-as-Observation（面试必考点）：</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>层级</th>
+<th>机制</th>
+<th>行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Conditional Routing</td>
+<td>图级</td>
+<td>Planner 后 <code>_validate_and_refine()</code> 写入 <code>planner_route</code></td>
+<td>硬伤→retry_planner 重生成，离群→retry_hotel 重搜酒店</td>
+</tr>
+<tr>
+<td>Error-as-Observation</td>
+<td>Agent 级</td>
+<td>Node 内 catch 异常</td>
+<td>MCP 超时→返回降级文本→Agent 自主决定</td>
+</tr>
+</tbody>
+</table>
+<p>当前图（4 Node，天气+城际交通在 API 层预处理，不在图中）：</p>
+<pre><code>START → attraction → hotel → memory → planner → [conditional]
+                                        ↙         ↓          ↘
+                              retry_planner   retry_hotel    done → END
+                              (硬伤重生成)    (离群重算)
+</code></pre>
+<p><strong>Conditional Edge 路由规则：</strong></p>
+<table>
+<thead>
+<tr>
+<th>planner_route</th>
+<th>触发条件</th>
+<th>目标</th>
+<th>上限</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>retry_planner</code></td>
+<td>硬伤（缺字段/景点&lt;2/预算超30%）</td>
+<td>planner 自回环</td>
+<td>MAX_RETRY=3</td>
+</tr>
+<tr>
+<td><code>retry_hotel</code></td>
+<td>离群景点→重算中心</td>
+<td>hotel Node 重搜</td>
+<td>MAX_HOTEL_RETRY=2</td>
+</tr>
+<tr>
+<td><code>done</code></td>
+<td>校验通过 or 重试耗尽</td>
+<td>END</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="43-interrupt-200">4.3 Interrupt 容错升级（~200 行新增，零删除）</h3>
+<p>Phase 3 后期进行了 6 项 interrupt-resilient 升级，确保 Agent 在被中断（LLM 超时、MCP 挂断、用户取消、进程重启）后能可靠恢复：</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>能力</th>
+<th>位置</th>
+<th>实现</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>SQLite Checkpoint 持久化</strong></td>
+<td><code>builder.py</code></td>
+<td>SqliteSaver 替代默认 MemorySaver，存到 <code>data/checkpoints.db</code>。进程重启后相同 thread_id 从上次断点继续，不重跑已完成 Node</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>LLM 退避重试</strong></td>
+<td><code>trip_planner_agent.py: _run_agent_with_retry()</code></td>
+<td>指数退避（1s→2s→4s）+ jitter，处理 API 超时/限流/500。<code>nodes.py</code> 中 5 处 LLM 调用全部切换为 retry 版本</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>MCP 超时保护</strong></td>
+<td><code>amap_wrapper.py: _mcp_run_with_timeout()</code></td>
+<td>ThreadPool 包装 MCP 调用，10s 超时兜底，避免 MCP 子进程挂死阻塞整个 Node</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>记忆去重</strong></td>
+<td><code>memory/manager.py: add()</code></td>
+<td>写入前检查最近一条记录的 content，相同则跳过。防止 error_log 重复追加和相同偏好重复写入</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>SSE 取消传播</strong></td>
+<td><code>trip.py</code></td>
+<td><code>cancel_event</code> + <code>try/except CancelledError</code>。前端 SSE 断开时立即中止后台 <code>graph.invoke()</code> 线程，避免白跑完整 4 Agent 流程</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>thread_id 配置</strong></td>
+<td><code>trip.py</code></td>
+<td><code>graph.invoke(state, config={"configurable": {"thread_id": ...}})</code>，Checkpoint 断点续传的前置条件</td>
+</tr>
+</tbody>
+</table>
+<p><strong>设计原则</strong>：先防崩溃（thread_id + SqliteSaver），再省资源（cancel 传播 + retry 退避），最后去噪音（记忆去重）。所有改动纯增量，不破坏现有 Node 逻辑。</p>
+<h3 id="44-4-node">4.4 4 Node 分工详表</h3>
+<table>
+<thead>
+<tr>
+<th>Node</th>
+<th>类型</th>
+<th>调 LLM</th>
+<th>调 MCP</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>attraction</strong></td>
+<td>Agent</td>
+<td>✅</td>
+<td>✅ maps_geo + maps_around</td>
+<td>① maps_geo 获取城市中心坐标 ② maps_around 以 20km 半径搜索景点 ③ 本地 Python 计算景点群物理中心（质心）。失败 → attraction_status="failed"，不阻断下游</td>
+</tr>
+<tr>
+<td><strong>hotel</strong></td>
+<td>Agent</td>
+<td>✅</td>
+<td>✅ maps_around</td>
+<td>优先使用景点中心 nearby 搜索酒店。离群重算时使用覆写中心。失败 → 退化全城搜索</td>
+</tr>
+<tr>
+<td><strong>memory</strong></td>
+<td>数据加载</td>
+<td>❌</td>
+<td>❌</td>
+<td>从 <code>data/memory.json</code> 加载用户画像，注入 <code>state.user_profile</code>。纯本地 I/O，不消耗 token。trip_count &lt; 5 时画像为空</td>
+</tr>
+<tr>
+<td><strong>planner</strong></td>
+<td>Agent</td>
+<td>✅</td>
+<td>❌</td>
+<td>整合前三者数据 + 天气(API层) + 用户画像，生成结构化 TripPlan JSON。<strong>唯一不调 MCP 的 Node</strong>——输入已由前 3 个 Node + API 层准备好，纯 LLM 推理。内置本地校验: 硬伤/软伤/离群检测 → 写 <code>planner_route</code> 触发 conditional edge</td>
+</tr>
+</tbody>
+</table>
+<p><strong>天气去哪了？</strong> 天气查询（<code>_fetch_weather()</code>）已从 weather_node 移至 API 层预处理，在 <code>graph.invoke()</code> 之前完成，直接写入 <code>state.weather_data</code>。优势：减少 1 个图 Node（简化拓扑）、避免 Agent 内 ReAct 轮次浪费在确定性 API 调用上。</p>
+<p><strong>为什么 memory 是独立 Node 而非 planner 内部调用？</strong></p>
+<blockquote>
+<p>职责分离：memory 管数据获取，planner 管推理。分开后可以独立测试、独立替换（后续换向量检索不影响 planner）。面试关键词：<strong>单一职责原则</strong>。</p>
+</blockquote>
+<p><strong>为什么 planner 没有工具？</strong></p>
+<blockquote>
+<p>Planner 的输入是前 3 个 Node + API 层（天气）已经处理好的结构化数据。给它加工具反而让它分心——Planner 的职责是"理解和重组"，不是"搜索和获取"。Agent 1-2 是感知型，Agent 3 是推理型。</p>
+</blockquote>
+<p><strong>为什么城际交通和天气不在图中？</strong> 城际交通需要跨城市距离矩阵计算，天气是确定性 API 查询——两者在 Node 内通过 MCP 调用效率低且增加 ReAct 轮次。提前在 API 层批量计算后注入 State，图内 Node 无需感知这些逻辑。天气从图 Node 移除后，图拓扑从 5 Node 简化为 4 Node。</p>
+<hr />
+<h2 id="phase-4-tool-wrapper">五、Phase 4: 本地 Tool 与 Wrapper 模式</h2>
+<h3 id="51">5.1 做了什么</h3>
+<ul>
+<li>实现 AmapToolWrapper：包装 MCPTool，内部完成 MCP 调用→格式化→校验</li>
+<li>实现 FallbackTool：所有外部服务失败时的兜底方案</li>
+<li>修改 Agent 使用 Wrapper 替代原始 MCPTool</li>
+</ul>
+<h3 id="52">5.2 关键设计决策</h3>
+<p><strong>为什么用 Wrapper 而非独立 Tool 串联？</strong></p>
+<pre><code>❌ 独立 Tool（Agent 需要调 3 次）:
+   Agent → MCPTool → FormatTool → ValidateTool → 现在开始思考
+   浪费 3 轮 ReAct，Agent 被迫理解流水线
+
+✅ Wrapper（Agent 只调 1 次）:
+   Agent → AmapToolWrapper → 内部: MCP→Format→Validate → 返回干净文本
+</code></pre>
+<p>Wrapper 内部三层处理：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>名称</th>
+<th>职责</th>
+<th>依赖</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>MCP 调用</td>
+<td>通过子进程调高德 API</td>
+<td>网络 I/O</td>
+</tr>
+<tr>
+<td>2</td>
+<td>格式化</td>
+<td>JSON→结构化文本（纯 Python）</td>
+<td>无</td>
+</tr>
+<tr>
+<td>3</td>
+<td>校验</td>
+<td>补默认值、降级标注（纯 Python）</td>
+<td>无</td>
+</tr>
+</tbody>
+</table>
+<p>第 2、3 层不消耗 LLM token，不占用上下文窗口。</p>
+<p><strong>FormatTool 为什么不用 LLM？</strong></p>
+<p>LLM 格式化有两个问题：
+1. 消耗 token——格式化指令 + JSON 原文占用上下文，挤占 Planner 的推理空间
+2. 不确定性——LLM 可能误解 JSON 结构，产生幻觉</p>
+<p>纯 Python 格式化是确定性的，100% 可控。</p>
+<hr />
+<h2 id="phase-5-api">六、Phase 5: API 层增强 — 天气查询 + 城际交通预处理 + 景点坐标增强</h2>
+<h3 id="61">6.1 做了什么</h3>
+<ul>
+<li><strong>天气查询从图 Node 移至 API 层</strong>（<code>_fetch_weather()</code>）——直接调 MCP <code>maps_weather</code>，格式化后注入 State</li>
+<li><strong>城际交通从图 Node 移至 API 层预处理</strong>（<code>_compute_intercity()</code>）</li>
+<li><strong>景点搜索坐标增强</strong>：attraction_node 内先调 <code>maps_geo</code> 获取城市中心，再用 <code>maps_around</code> 以 20km 半径搜索（限制范围，避免非城市景点）</li>
+<li><strong>景点群物理中心计算</strong>：本地 Python 从搜索结果中提取坐标，计算质心，传给 hotel_node 就近搜索</li>
+<li>实现出行方式选择（高铁/飞机/自驾）与推理逻辑</li>
+<li>定义 IntercityTransport Pydantic 模型</li>
+<li><strong>降级透明化</strong>：所有错误通过 <code>Annotated[list, add]</code> 累积，前端列表展示</li>
+<li>Python 本地 <code>_compute_dates()</code> 预计算日期（不交 LLM）</li>
+<li>保持原有 Pydantic 校验 + CORS + Swagger UI</li>
+</ul>
+<h3 id="62">6.2 关键设计决策</h3>
+<p><strong>为什么天气在 API 层而非图 Node？</strong></p>
+<p>天气查询是确定性 API 调用——输入城市名，输出天气预报 JSON。放在图 Node 内需要经过 Agent ReAct 循环（Thought → Action → Observation），浪费 LLM token 和推理时间。API 层直接调 MCP <code>maps_weather</code>，格式化后注入 State，图内 planner_node 直接读取 <code>state.weather_data</code>。</p>
+<pre><code class="language-python"># API 层直接调用（trip.py）
+weather_data, weather_status, weather_error = _fetch_weather(request.city)
+state[&quot;weather_data&quot;] = weather_data
+state[&quot;weather_status&quot;] = weather_status
+</code></pre>
+<p><strong>景点坐标增强 — maps_geo + maps_around 两段式搜索：</strong></p>
+<p>传统全城 text_search 会返回远郊景点，影响后续酒店选址。两段式方案：</p>
+<ol>
+<li><code>maps_geo(city)</code> → 获取城市中心坐标 (lng, lat)</li>
+<li><code>maps_around(keywords, center, radius=20000)</code> → 以中心 20km 半径搜索景点</li>
+<li>失败时退化全城 <code>maps_text_search</code></li>
+</ol>
+<p><strong>景点群物理中心（质心）计算：</strong></p>
+<p>从搜索结果中提取所有景点的 <code>📍(lng,lat)</code> 标记，本地 Python 计算质心坐标。此中心传给 hotel_node 作为 nearby 搜索中心，确保酒店靠近景点群。</p>
+<pre><code class="language-python">clng = sum(p[&quot;lng&quot;] for p in parsed) / len(parsed)
+clat = sum(p[&quot;lat&quot;] for p in parsed) / len(parsed)
+</code></pre>
+<p>城际交通需要跨城市距离矩阵（如北京→上海→南京→杭州）。原方案在 weather_node 或 planner_node 中通过 MCP 逐个查询——每个城市对 1 次 MCP 调用，N 个城市产生 O(N²) 次调用，且占用 ReAct 轮次。API 层在图中之前批量计算所有城市对的距离/时间/费用，一次性注入 <code>State.intercity_transport</code>，图内 Node 无需感知城际逻辑。</p>
+<pre><code>API 层 _compute_intercity(cities):
+  for i, origin in enumerate(cities[:-1]):
+    调用 MCP 查询 origin → cities[i+1] 的驾车/公交/步行距离
+    → 按距离分类: &lt;200km 自驾, 200-800km 高铁, &gt;800km 飞机
+    → 估算费用: 高铁 0.5元/km, 飞机 0.8元/km, 自驾 1.0元/km
+    → 填充 IntercityTransport 列表
+  return transport_list → 注入 State
+</code></pre>
+<p><strong>出行方式选择逻辑：</strong></p>
+<table>
+<thead>
+<tr>
+<th>距离范围</th>
+<th>推荐方式</th>
+<th>推理依据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>&lt;200km</td>
+<td>自驾</td>
+<td>灵活、成本低（1.0元/km）、适合短途搬家</td>
+</tr>
+<tr>
+<td>200-800km</td>
+<td>高铁</td>
+<td>速度快、准时、性价比高（0.5元/km）</td>
+</tr>
+<tr>
+<td>&gt;800km</td>
+<td>飞机</td>
+<td>远距离唯一高效选择（0.8元/km）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>IntercityTransport 模型：</strong></p>
+<pre><code class="language-python">class IntercityTransport(BaseModel):
+    origin: str          # 出发城市
+    destination: str     # 到达城市
+    distance_km: float   # 城市间距离
+    estimated_cost: float  # 估算费用
+    travel_time_hours: float  # 预计耗时
+    mode: Literal[&quot;高铁&quot;, &quot;飞机&quot;, &quot;自驾&quot;]  # 推荐出行方式
+    classification: Literal[&quot;short&quot;, &quot;medium&quot;, &quot;long&quot;]  # 距离分类
+</code></pre>
+<p><strong>降级透明化 — <code>Annotated[list, add]</code> 解决多 Node 覆盖问题：</strong></p>
+<p>LangGraph 的 State partial update 默认使用<strong>覆盖语义</strong>——如果两个 Node 都返回 <code>{"error_log": err}</code>，后者覆盖前者。解决方案：</p>
+<pre><code class="language-python">class TripPlannerState(TypedDict):
+    error_log: Annotated[list[str], add]  # add = 累加而非覆盖
+</code></pre>
+<p>每个 Node 的错误追加到列表，不会互相覆盖。前端拿到完整 <code>error_log</code> 以列表形式展示：</p>
+<pre><code>前端降级面板:
+  ⚠️ 景点数据部分缺失（MCP 超时）→ 已使用缓存推荐
+  ⚠️ 城际交通查询失败（上海→南京）→ 已使用直线距离估算
+  ✅ 其他数据正常
+</code></pre>
+<p><strong><code>_compute_dates()</code> — 日期在 Python 本地算，不交 LLM：</strong></p>
+<pre><code class="language-python">def _compute_dates(start_date: str, days: int) -&gt; list[str]:
+    &quot;&quot;&quot;纯 Python 日期计算，不消耗 LLM token&quot;&quot;&quot;
+    from datetime import date, timedelta
+    start = date.fromisoformat(start_date)
+    return [str(start + timedelta(days=i)) for i in range(days)]
+</code></pre>
+<p>LLM 不擅长日期计算（容易算错跨月/跨年），纯 Python 100% 准确且零 token 消耗。</p>
+<h3 id="63">6.3 三层分离（保持）</h3>
+<pre><code>api/trip.py     ← HTTP 层：路由、城际交通预处理、降级聚合
+models/         ← 数据层：Pydantic 定义数据 shape（IntercityTransport, TripRequest, TripPlan）
+agents/ + graph/ ← 业务层：Agent 编排、工具调用（仅市内数据）
+</code></pre>
+<p>换编排引擎（LangGraph）只需改 agents/ 里的代码，API 层不用动。</p>
+<hr />
+<h2 id="phase-6-hotel_retry">七、Phase 6: 记忆模块（双轨异常检测 + 多维度画像）+ 离群检测 + hotel_retry 上限</h2>
+<h3 id="71">7.1 做了什么</h3>
+<ul>
+<li><strong>双轨异常检测</strong>：数值型 IQR + 分类型频率比，两轨并行互不干扰</li>
+<li><strong>景点离群检测（planner_node 内置）</strong>：标准差法 + 80km 硬上限，双轮过滤非城市景点</li>
+<li><strong>酒店重试上限</strong>：MAX_HOTEL_RETRY=2，防止离群重算无限循环</li>
+<li><strong>Planner 自回环上限</strong>：MAX_RETRY=3，硬伤重生成有节制</li>
+<li>分类型异常检测覆盖 <strong>8 个维度</strong>：饮食/交通/节奏/住宿/预算/景点/出行方式/距离</li>
+<li>画像多维度构建：<strong>出行方式/距离偏好/住宿/预算/饮食/交通/节奏/兴趣</strong></li>
+<li><strong>trip_count 阈值</strong>：≥5 次出行才显示画像（渐进构建，避免小样本误判）</li>
+<li><code>Annotated[list, add]</code> 应用于多 Node error_log 累加（与 Phase 5 降级机制一致）</li>
+<li>集成到 LangGraph：memory_node 加载画像到 State</li>
+</ul>
+<h3 id="72">7.2 关键设计决策</h3>
+<p><strong>双轨异常检测架构：</strong></p>
+<pre><code>输入: 新记忆条目
+        │
+        ├─ 数值型字段（价格、距离、天数）→ IQR 检测
+        │    Q1, Q3 = percentile(values, [25, 75])
+        │    IQR = max(Q3 - Q1, min_iqr)
+        │    异常 = value &lt; Q1 - 2*IQR or value &gt; Q3 + 2*IQR
+        │
+        └─ 分类型字段（饮食、交通、住宿档次）→ 频率比检测
+             frequency_ratio = 该类别出现次数 / 总数
+             异常 = frequency_ratio &lt; 阈值（如 0.15 = 出现次数&lt;总次数的15%）
+</code></pre>
+<p><strong>景点离群检测 — 标准差法 + 80km 硬上限（planner_node 内置）：</strong></p>
+<p>Planner 生成计划后，<code>_validate_and_refine()</code> 对 attractions_coords 做离群检测，防止非城市景点污染酒店选址：</p>
+<pre><code>第一轮: 硬上限检测（&gt;80km 直接排除）
+  景点到群中心的距离 &gt; MAX_ATTRACTION_RANGE_KM (80km) → 直接从群中移除
+
+第二轮: 标准差离群检测（仅对剩余景点）
+  avg_dist = 剩余景点平均距离
+  sigma = 标准差
+  threshold = avg_dist + OUTLIER_SIGMA (1.5) × sigma
+  距离 &gt; threshold → 标记为离群
+
+如果检测到离群景点:
+  → 排除离群景点后重新计算质心 (center_lng_override, center_lat_override)
+  → 写入 state.planner_route = &quot;retry_hotel&quot;
+  → hotel_node 用覆写中心重新搜索酒店
+  → 最多重试 MAX_HOTEL_RETRY=2 次，防止无限循环
+</code></pre>
+<p><strong>retry 上限常量（nodes.py）：</strong></p>
+<pre><code class="language-python">MAX_RETRY = 3          # Planner 自回环最大次数（硬伤重生成）
+MAX_HOTEL_RETRY = 2    # 酒店回环最大次数（离群重算）
+OUTLIER_SIGMA = 1.5    # 离群阈值：距离 &gt; mean + 1.5*sigma
+MAX_ATTRACTION_RANGE_KM = 80  # 景点硬上限
+</code></pre>
+<p><strong>分类型异常检测的 8 个维度：</strong></p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>检测字段</th>
+<th>异常判定逻辑</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>饮食偏好</td>
+<td>辣/清淡/海鲜/西餐...</td>
+<td>出现频率 &lt; 15% 标为异常，不纳入偏好画像</td>
+</tr>
+<tr>
+<td>交通方式</td>
+<td>地铁/公交/打车/自驾...</td>
+<td>偶发选择不改变默认交通画像</td>
+</tr>
+<tr>
+<td>旅行节奏</td>
+<td>轻松/紧凑/适中</td>
+<td>与历史节奏不一致时降低权重</td>
+</tr>
+<tr>
+<td>住宿档次</td>
+<td>经济型/舒适型/豪华型</td>
+<td>偶发豪华住宿不改变经济型画像</td>
+</tr>
+<tr>
+<td>预算范围</td>
+<td>数值区间（元）</td>
+<td>数值型用 IQR，分类型预算标签用频率比</td>
+</tr>
+<tr>
+<td>景点类型</td>
+<td>自然/历史/博物馆/购物...</td>
+<td>低频类型不纳入推荐</td>
+</tr>
+<tr>
+<td>出行方式</td>
+<td>高铁/飞机/自驾</td>
+<td>与交通方式维度互补，关注城际出行偏好</td>
+</tr>
+<tr>
+<td>距离偏好</td>
+<td>短途/中途/长途</td>
+<td>多数出行距离范围决定默认推荐</td>
+</tr>
+</tbody>
+</table>
+<p><strong>多维度画像结构：</strong></p>
+<pre><code class="language-python">class UserProfile(BaseModel):
+    trip_count: int                     # 出行总次数
+    profile_ready: bool                 # trip_count &gt;= 5 时为 True
+    transport_mode: dict[str, float]    # {&quot;地铁&quot;: 0.7, &quot;打车&quot;: 0.2, &quot;自驾&quot;: 0.1}
+    distance_preference: dict[str, float]  # {&quot;短途&quot;: 0.6, &quot;中途&quot;: 0.3, &quot;长途&quot;: 0.1}
+    accommodation: dict[str, float]     # {&quot;经济型&quot;: 0.8, &quot;舒适型&quot;: 0.2}
+    budget_range: dict[str, float]      # 预算偏好分布
+    food_preference: dict[str, float]   # {&quot;不辣&quot;: 0.6, &quot;清淡&quot;: 0.3}
+    transport_mode_intercity: dict[str, float]  # {&quot;高铁&quot;: 0.7, &quot;飞机&quot;: 0.3}
+    pace_preference: dict[str, float]   # {&quot;轻松&quot;: 0.5, &quot;适中&quot;: 0.3, &quot;紧凑&quot;: 0.2}
+    interest_tags: dict[str, float]     # {&quot;自然&quot;: 0.5, &quot;历史&quot;: 0.3, &quot;美食&quot;: 0.2}
+</code></pre>
+<p><strong>trip_count 渐进构建策略：</strong></p>
+<pre><code>trip_count = 1-2:  只记录，不生成画像（profile_ready = False）
+trip_count = 3-4:  生成临时画像，标注「低置信度」（样本不足）
+trip_count &gt;= 5:   生成正式画像，用户可见（profile_ready = True）
+                   每次新出行动态更新画像权重
+</code></pre>
+<p><strong>Alex 案例（双轨检测的综合价值）：</strong></p>
+<pre><code>Alex 5 次出行都选经济型酒店（300-500 元），偏好吃不辣、地铁出行
+
+第 6 次陪老板出差：
+  → 酒店: 豪华型 1500 元 → IQR 数值异常（价格偏离 2*IQR）
+  → 饮食: 高档西餐 → 频率比异常（此前从未出现）
+  → 交通: 豪华专车 → 频率比异常（此前以地铁为主）
+
+传统方案: 所有新记忆权重相同，画像被&quot;污染&quot;，下次推荐全变
+本方案:
+  数值型: 豪华酒店 outlier_penalty = 0.3, 最终权重 = 0.45
+          经济型酒店最终权重 = 2.40（5.3 倍主导力）
+  分类型: 高档西餐/豪华专车 frequency_ratio = 1/6 ≈ 0.17
+          仍低于阈值 0.25，标记为异常不纳入偏好画像
+  → 画像仍保持「经济型 + 不辣 + 地铁」
+</code></pre>
+<p><strong><code>Annotated[list, add]</code> 在多 Node 场景的应用：</strong></p>
+<p>与 Phase 5 降级机制一致，多 Node 的 error_log 通过 <code>Annotated[list, add]</code> 累加：</p>
+<pre><code class="language-python">class TripPlannerState(TypedDict):
+    error_log: Annotated[list[str], add]     # 累加而非覆盖
+    memory_error_log: Annotated[list[str], add]  # 记忆模块独立错误通道
+</code></pre>
+<p>memory_node 自身出错不会污染其他 Node 的 error_log，前端区分「系统降级」和「画像异常」。</p>
+<h3 id="73">7.3 五因子权重公式（保持）</h3>
+<pre><code>最终权重 = domain × decay × interaction × frequency_boost × outlier_penalty
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>因子</th>
+<th>含义</th>
+<th>计算方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>domain</td>
+<td>领域重要性</td>
+<td>景点 2x &gt; 酒店 1.5x &gt; 天气 1x</td>
+</tr>
+<tr>
+<td>decay</td>
+<td>时间衰减</td>
+<td>e^(-0.05 × 距今天数)</td>
+</tr>
+<tr>
+<td>interaction</td>
+<td>用户反馈</td>
+<td>modify +0.5 / confirm +0.2 / observe 1.0</td>
+</tr>
+<tr>
+<td>frequency_boost</td>
+<td>统计置信度</td>
+<td>1.0 + min(出现次数 × 0.15, 1.0)</td>
+</tr>
+<tr>
+<td>outlier_penalty</td>
+<td>异常检测</td>
+<td>数值型 IQR 异常 = 0.3，分类型频率比异常 = 0.2</td>
+</tr>
+</tbody>
+</table>
+<h3 id="74">7.4 面试讲述要点</h3>
+<blockquote>
+<p>"我们的记忆系统有两层信号处理。第一层是<strong>双轨异常检测</strong>——数值型字段走 IQR，分类型字段走频率比，两轨并行互不干扰。第二层是<strong>渐进画像构建</strong>——不到 5 次出行不给画像，避免小样本误判。Alex 陪老板住一次豪华酒店不会永久改变他的经济型画像，分类型的高档西餐同样被频率比过滤。这是从'存/取'到'统计信号处理'的升级。"</p>
+</blockquote>
+<hr />
+<h2 id="phase-7">八、Phase 7: 前端交互设计</h2>
+<h3 id="81">8.1 做了什么</h3>
+<ul>
+<li><strong>6 维度标签系统</strong>：城市/天数/预算/节奏/饮食/兴趣的交互式选择</li>
+<li><strong>出行方式选择器</strong>：高铁/飞机/自驾（与后端 IntercityTransport 模型对应）</li>
+<li><strong>降级列表面板</strong>：前端以列表形式展示 <code>error_log</code>（按严重程度着色）</li>
+<li><strong>画像渐进构建</strong>：trip_count &lt; 5 时显示「画像构建中」，≥5 次展示完整画像</li>
+<li>日期选择器对接后端 <code>_compute_dates()</code></li>
+</ul>
+<h3 id="82">8.2 关键设计决策</h3>
+<p><strong>6 维度标签体系：</strong></p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>标签示例</th>
+<th>交互方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>城市</td>
+<td>北京/上海/南京...（多选）</td>
+<td>搜索 + 多选 badges</td>
+</tr>
+<tr>
+<td>天数</td>
+<td>3/5/7/自定义</td>
+<td>滑块 + 数字输入</td>
+</tr>
+<tr>
+<td>预算</td>
+<td>经济/舒适/豪华</td>
+<td>三档单选，对应价格区间</td>
+</tr>
+<tr>
+<td>节奏</td>
+<td>轻松/适中/紧凑</td>
+<td>三档单选，影响每日景点数</td>
+</tr>
+<tr>
+<td>饮食</td>
+<td>不辣/微辣/辣/海鲜/素食...</td>
+<td>多选标签</td>
+</tr>
+<tr>
+<td>兴趣</td>
+<td>自然/历史/美食/购物/亲子...</td>
+<td>多选标签，最多选 3 个</td>
+</tr>
+</tbody>
+</table>
+<p><strong>出行方式选择器：</strong></p>
+<p>与后端 <code>_compute_intercity()</code> 的分类逻辑完全对应。前端默认按距离推荐，用户可覆盖选择。选择结果写入 <code>State.preferred_transport_mode</code>。</p>
+<pre><code>北京 → 上海（1200km）: 默认推荐 ✈️ 飞机  [可选: 🚄高铁]
+上海 → 南京（300km）: 默认推荐 🚄 高铁  [可选: 🚗自驾]
+</code></pre>
+<p><strong>降级列表面板：</strong></p>
+<p>后端 <code>error_log</code> 通过 <code>Annotated[list, add]</code> 累加后返回前端。前端按严重程度渲染：</p>
+<pre><code>🟢 正常: 所有数据加载成功
+🟡 降级: 景点推荐使用了缓存（实时 API 超时）
+🟡 降级: 酒店价格查询失败，使用估算价格
+🔴 异常: 画像数据加载失败，本次使用默认推荐
+</code></pre>
+<p>降级不影响主流程，但让用户清楚知道哪些数据是实时/缓存/估算的——<strong>降级透明化</strong>。</p>
+<p><strong>画像渐进构建（前端视角）：</strong></p>
+<pre><code>trip_count = 0:  不展示画像区域
+trip_count = 1-2: 显示「完成更多出行以解锁个性化画像」
+trip_count = 3-4: 显示低置信度画像 + 「基于有限数据的初步画像」
+trip_count &gt;= 5:  显示完整画像雷达图（8 维度）
+</code></pre>
+<hr />
+<h2 id="_2">九、端到端流程</h2>
+<pre><code>用户请求 POST /api/trip {&quot;city&quot;:&quot;北京&quot;,&quot;days&quot;:3,&quot;cities&quot;:[&quot;北京&quot;,&quot;上海&quot;,&quot;南京&quot;]}
+     │
+     ▼
+API 层预处理（Phase 5）:
+  ├─ _compute_dates(start_date, days)         → Python 本地日期列表
+  ├─ _fetch_weather(city)                      → maps_weather 天气查询 + 格式化
+  ├─ _compute_intercity(cities)               → IntercityTransport 列表（出行方式/距离/费用）
+  └─ 注入 State.weather_data + State.intercity_transport + State.dates
+     │
+     ▼
+graph.invoke(state)
+     │
+     ├─ Node 1: attraction_node   ① maps_geo → 城市中心  ② maps_around(20km) → 景点列表  ③ 本地计算景点群质心
+     ├─ Node 2: hotel_node        使用景点质心 nearby 搜索酒店（Wrapper 3 层）→ 酒店列表
+     ├─ Node 3: memory_node       加载用户画像（双轨异常检测 + trip_count 阈值）
+     └─ Node 4: planner_node      整合: 景点+天气+酒店+画像+城际交通 → 本地校验(硬伤/软伤/离群) → 结构化 JSON
+              │
+              ├─ 硬伤 &amp; retry &lt; 3  → retry_planner（自回环重生成）
+              ├─ 离群 &amp; hotel_retry &lt; 2 → retry_hotel（回酒店用新中心重搜）
+              └─ done → 输出最终计划
+     │
+     ▼
+降级聚合（Phase 5）:
+  └─ error_log 通过 Annotated[list, add] 累加 → 前端降级面板
+     │
+     ▼
+200 OK + TripPlan JSON（含 intercity_transport + dates + error_log + user_profile）
+</code></pre>
+<p>每一步自动 Checkpoint 持久化。中断后可续。</p>
+<p><strong>关键架构要点速览：</strong></p>
+<table>
+<thead>
+<tr>
+<th>关注点</th>
+<th>方案</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>天气查询</td>
+<td>API 层 <code>_fetch_weather()</code> 直接调 MCP</td>
+<td>Phase 5</td>
+</tr>
+<tr>
+<td>城际交通</td>
+<td>API 层 <code>_compute_intercity()</code> 预计算</td>
+<td>Phase 5</td>
+</tr>
+<tr>
+<td>景点坐标增强</td>
+<td>maps_geo 获取中心 + maps_around 20km 范围</td>
+<td>Phase 5</td>
+</tr>
+<tr>
+<td>景点中心计算</td>
+<td>本地 Python 质心计算</td>
+<td>Phase 5</td>
+</tr>
+<tr>
+<td>出行方式</td>
+<td>距离分类（&lt;200/200-800/&gt;800km）→ 自驾/高铁/飞机</td>
+<td>Phase 5</td>
+</tr>
+<tr>
+<td>降级透明化</td>
+<td><code>Annotated[list, add]</code> 累加 error_log</td>
+<td>Phase 5</td>
+</tr>
+<tr>
+<td>景点离群检测</td>
+<td>标准差法（mean+1.5σ）+ 80km 硬上限</td>
+<td>Phase 6</td>
+</tr>
+<tr>
+<td>数值异常检测</td>
+<td>IQR 方法</td>
+<td>Phase 6</td>
+</tr>
+<tr>
+<td>分类异常检测</td>
+<td>频率比 &lt; 15% 阈值（8 维度）</td>
+<td>Phase 6</td>
+</tr>
+<tr>
+<td>Planner 自回环</td>
+<td>硬伤重生成，MAX_RETRY=3</td>
+<td>Phase 6</td>
+</tr>
+<tr>
+<td>Hotel 重试上限</td>
+<td>离群重算，MAX_HOTEL_RETRY=2</td>
+<td>Phase 6</td>
+</tr>
+<tr>
+<td>画像阈值</td>
+<td>trip_count &gt;= 5 才显示</td>
+<td>Phase 6</td>
+</tr>
+<tr>
+<td>前端降级面板</td>
+<td>按严重程度着色（🟢🟡🔴）</td>
+<td>Phase 7</td>
+</tr>
+<tr>
+<td>前端画像</td>
+<td>雷达图（8 维度）× trip_count 渐进展示</td>
+<td>Phase 7</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 SuperGODOG
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

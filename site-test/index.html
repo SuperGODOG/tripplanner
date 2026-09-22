@@ -1,0 +1,1299 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="基于 LangGraph + ReAct 自研编排的多智能体旅行规划系统 | 5 Node StateGraph · MCP · 五因子权重 · 双轨异常检测">
+      
+      
+      
+        <link rel="canonical" href="https://supergodog.github.io/tripplanner/">
+      
+      
+      
+        <link rel="next" href="ARCHITECTURE/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Tripplanner · SuperGODOG</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tripplanner" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="." title="Tripplanner · SuperGODOG" class="md-header__button md-logo" aria-label="Tripplanner · SuperGODOG" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tripplanner · SuperGODOG
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              🧳 TripPlanner
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/SuperGODOG/tripplanner" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tripplanner
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="." title="Tripplanner · SuperGODOG" class="md-nav__button md-logo" aria-label="Tripplanner · SuperGODOG" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Tripplanner · SuperGODOG
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/SuperGODOG/tripplanner" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tripplanner
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🧳 TripPlanner
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="." class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🧳 TripPlanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚀 快速部署
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🚀 快速部署">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 克隆项目
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 创建虚拟环境
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 配置 API Key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 安装依赖并启动
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 启动 / 关闭
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🗑 重置记忆模块
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏗 架构设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🏗 架构设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        分层架构
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据流向
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        技术栈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具架构
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        记忆系统
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        扩展: Agent 反馈环与离群检测
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔮 后续更新计划
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔮 后续更新计划">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        容错与恢复（已落地）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        并发优化（已落地）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📁 项目结构
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🖥 前端功能
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#license" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📄 License
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TripPlanner — 全套架构图 (Mermaid)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="CLAUDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TripPlanner Project
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="PROJECT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TripPlanner 项目文档
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚀 快速部署
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🚀 快速部署">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 克隆项目
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 创建虚拟环境
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 配置 API Key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 安装依赖并启动
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 启动 / 关闭
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🗑 重置记忆模块
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏗 架构设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🏗 架构设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        分层架构
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据流向
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        技术栈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具架构
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        记忆系统
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        扩展: Agent 反馈环与离群检测
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔮 后续更新计划
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔮 后续更新计划">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        容错与恢复（已落地）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        并发优化（已落地）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📁 项目结构
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🖥 前端功能
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#license" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📄 License
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="tripplanner">🧳 TripPlanner</h1>
+<blockquote>
+<p>基于 LangGraph + ReAct 自研编排的多智能体旅行规划系统
+4 Node StateGraph · MCP 协议 · 五因子权重记忆 · 双轨异常检测</p>
+</blockquote>
+<p><a href="https://python.org"><img alt="Python" src="https://img.shields.io/badge/Python-3.10+-blue" /></a>
+<a href="https://langchain-ai.github.io/langgraph/"><img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-1.2-purple" /></a>
+<a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.139-green" /></a></p>
+<p>输入出发地 + 目的地 + 偏好 → 3 个 Agent 协作生成完整旅行计划（景点/酒店/预算），天气+城际交通在 API 层预处理，景点离群检测自动过滤远郊景点，用户画像随使用次数渐进构建。</p>
+<hr />
+<h2 id="_1">🚀 快速部署</h2>
+<h3 id="1">1. 克隆项目</h3>
+<pre><code class="language-bash">git clone https://github.com/你的用户名/tripplanner.git
+cd tripplanner/backend
+</code></pre>
+<h3 id="2">2. 创建虚拟环境</h3>
+<pre><code class="language-bash">python3 -m venv venv
+source venv/bin/activate       # Linux/macOS
+# venv\Scripts\activate        # Windows
+</code></pre>
+<h3 id="3-api-key">3. 配置 API Key</h3>
+<pre><code class="language-bash">cp .env.example venv/.env
+nano venv/.env
+</code></pre>
+<p>填入你的 Key：</p>
+<pre><code class="language-ini">LLM_API_KEY=sk-your-deepseek-key
+LLM_MODEL_ID=deepseek-chat
+LLM_BASE_URL=https://api.deepseek.com/v1
+AMAP_API_KEY=your-amap-web-service-key
+</code></pre>
+<blockquote>
+<p><strong>高德 Key 申请</strong>：https://console.amap.com/dev/key/app → 选择「Web 服务」类型</p>
+<p><strong>DeepSeek Key 申请</strong>：https://platform.deepseek.com/api_keys</p>
+</blockquote>
+<h3 id="4">4. 安装依赖并启动</h3>
+<pre><code class="language-bash"># 配置国内镜像加速（可选）
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+pip install -r requirements.txt
+python run.py
+</code></pre>
+<p>浏览器打开：
+- <strong>前端界面</strong>：http://localhost:8000/app/
+- <strong>API 文档</strong>：http://localhost:8000/docs</p>
+<h3 id="5">5. 启动 / 关闭</h3>
+<pre><code class="language-bash"># 启动（前台，Ctrl+C 关闭）
+cd backend &amp;&amp; source venv/bin/activate &amp;&amp; python run.py
+
+# 后台启动
+nohup python run.py &gt; server.log 2&gt;&amp;1 &amp;
+
+# 关闭
+kill $(lsof -ti:8000)
+</code></pre>
+<hr />
+<h2 id="_2">🗑 重置记忆模块</h2>
+<p>记忆数据存储在 <code>data/memory.json</code>，包含用户画像和行程计数。</p>
+<pre><code class="language-bash"># 完全重置（画像归零）
+rm -f backend/data/memory.json
+
+# 或只清空行程计数（保留偏好标签）
+python -c &quot;
+from app.memory.manager import get_memory
+m = get_memory()
+m.trip_count = 0
+m._save()
+print('行程计数已重置')
+&quot;
+</code></pre>
+<p>画像构建需要至少 5 次行程。重置后前端显示 <code>0 / 5 — 正在构建画像...</code>。</p>
+<hr />
+<h2 id="_3">🏗 架构设计</h2>
+<h3 id="_4">分层架构</h3>
+<pre><code>第 5 层  多智能体编排     ← 4 Node LangGraph + Conditional Edge
+第 4 层  图编排框架       ← StateGraph / Edge / Conditional / Checkpoint
+第 3 层  框架封装         ← HelloAgents SimpleAgent
+第 2 层  Agent 内循环     ← ReAct (Error-as-Observation)
+第 1 层  裸 LLM 调用      ← DeepSeek API
+第 0 层  API 预处理       ← 日期计算 / 天气查询 / 城际交通 / 记忆写入
+</code></pre>
+<h3 id="_5">数据流向</h3>
+<pre><code>POST /api/trip
+  │
+  ├─ API 预处理层
+  │   ├─ 日期列表本地计算（Python，不交 LLM）
+  │   ├─ 天气查询（maps_weather 直接调用）
+  │   ├─ 城际交通（maps_geo → maps_distance → 费用估算）
+  │   └─ 写入记忆（trip_count++）
+  │
+  └─ graph.invoke(state)
+       │
+       ├─ Node 1: attraction    ① maps_geo → 城市中心  ② maps_around 20km 搜索景点  ③ 本地 Python 计算景点群质心
+       ├─ Node 2: hotel         使用景点质心 nearby 搜索酒店
+       ├─ Node 3: memory        加载用户画像（纯本地）
+       └─ Node 4: planner       整合数据 + 本地校验（硬伤/软伤/离群检测）→ JSON
+            │
+            ├─ retry_planner: 硬伤重生成（最多 3 次）
+            ├─ retry_hotel:   离群景点 → 重算中心 → 回酒店重搜（最多 2 次）
+            └─ done:          输出最终计划
+            │
+            └─ 降级检测: 所有 error_log 累积 → 前端列表展示
+</code></pre>
+<h3 id="_6">技术栈</h3>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>选型</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>编排引擎</td>
+<td>LangGraph StateGraph</td>
+</tr>
+<tr>
+<td>Agent 框架</td>
+<td>HelloAgents SimpleAgent</td>
+</tr>
+<tr>
+<td>工具协议</td>
+<td>MCP (amap-mcp-server, 16 个工具)</td>
+</tr>
+<tr>
+<td>LLM</td>
+<td>DeepSeek (via HelloAgentsLLM)</td>
+</tr>
+<tr>
+<td>Web 框架</td>
+<td>FastAPI + Pydantic v2</td>
+</tr>
+<tr>
+<td>记忆</td>
+<td>自定义五因子权重 + 双轨异常检测</td>
+</tr>
+<tr>
+<td>前端</td>
+<td>单文件 HTML (零依赖)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_7">工具架构</h3>
+<pre><code>Agent 视角:  只看到 1 个 Tool (AmapToolWrapper)
+
+内部 3 层处理:
+  第 1 层  MCP 调用    maps_text_search / maps_weather
+  第 2 层  Format       JSON → 结构化文本（纯 Python）
+  第 3 层  Validate     完整性检查 + 默认值
+</code></pre>
+<h3 id="_8">记忆系统</h3>
+<p><strong>五因子权重公式：</strong></p>
+<pre><code>final_weight = domain × decay × interaction × frequency_boost × outlier_penalty
+</code></pre>
+<p><strong>双轨异常检测：</strong></p>
+<table>
+<thead>
+<tr>
+<th>轨道</th>
+<th>数据类型</th>
+<th>算法</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数值型</td>
+<td>价格标签</td>
+<td>IQR 四分位距</td>
+<td>5 次 ¥300-500 → 1 次 ¥1500 → outlier</td>
+</tr>
+<tr>
+<td>分类型</td>
+<td>偏好标签</td>
+<td>频率比</td>
+<td>5 次"不吃辣" → 1 次"爱吃辣" → outlier</td>
+</tr>
+</tbody>
+</table>
+<p><strong>画像维度（8 维）：</strong> 出行方式 / 距离偏好 / 住宿 / 预算 / 饮食 / 交通 / 节奏 / 兴趣</p>
+<h3 id="agent">扩展: Agent 反馈环与离群检测</h3>
+<p>当前图是 4 Node + Conditional Edge 流: <code>attraction → hotel → memory → planner → [retry_planner / retry_hotel / done]</code>。</p>
+<p><strong>已实现的 Conditional Edge 路由：</strong></p>
+<table>
+<thead>
+<tr>
+<th>路由</th>
+<th>触发条件</th>
+<th>行为</th>
+<th>上限</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>retry_planner</code></td>
+<td>硬伤（缺字段/景点&lt;2/预算超30%）</td>
+<td>planner 自回环重生成</td>
+<td>MAX_RETRY=3</td>
+</tr>
+<tr>
+<td><code>retry_hotel</code></td>
+<td>离群景点（标准差 &gt; mean+1.5σ 或 &gt;80km）</td>
+<td>重算中心 → hotel 重搜</td>
+<td>MAX_HOTEL_RETRY=2</td>
+</tr>
+<tr>
+<td><code>done</code></td>
+<td>校验通过或重试耗尽</td>
+<td>→ END</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong>离群检测双轮过滤：</strong>
+1. <strong>硬上限（80km）</strong>：景点到群中心距离 &gt;80km → 直接排除（非城市景点）
+2. <strong>标准差法（1.5σ）</strong>：距离 &gt; mean + 1.5×σ → 标记离群 → 排除后重算质心 → 触发 retry_hotel</p>
+<p>LangGraph 的 conditional edge 机制让这种 Agent 间闭环反馈只需图拓扑层面的路由配置，无需改动 Node 内部逻辑。</p>
+<hr />
+<h2 id="_9">🔮 后续更新计划</h2>
+<ul>
+<li>[x] <strong>Conditional Edge 实现</strong>：retry_planner（硬伤重生成 3 次）+ retry_hotel（离群重算 2 次）已上线</li>
+<li>[ ] <strong>多用户支持</strong>：记忆模块加入用户隔离（当前为单用户模式）</li>
+<li>[ ] <strong>向量化记忆检索</strong>：当前为关键词匹配，升级为 embedding + 向量相似度（适合"用户之前去杭州时喜欢什么类型"这类语义查询）</li>
+<li>[x] <strong>流式响应 (SSE)</strong>：API 改为 Server-Sent Events，前端实时展示每个 Node 的进度</li>
+<li>[x] <strong>API 层与图内并发</strong>：intercity ∥ weather、maps_geo 双查、memory ∥ attraction fan-out 拓扑</li>
+<li>[ ] <strong>多 LLM 提供商</strong>：支持 OpenAI / Claude / 本地模型切换</li>
+<li>[ ] <strong>A2A 协议集成</strong>：Agent-to-Agent 通信，支持跨系统 Agent 协作</li>
+<li>[x] <strong>前端重构</strong>：从单文件 HTML 迁移到 React/Vue 组件化</li>
+<li>[ ] <strong>Docker 部署</strong>：提供 Dockerfile + docker-compose，一键启动全部服务</li>
+<li>[ ] <strong>自动化测试</strong>：pytest 覆盖各 Node 的单元测试 + 集成测试</li>
+</ul>
+<h3 id="_10">容错与恢复（已落地）</h3>
+<ul>
+<li><strong>LangGraph Checkpoint</strong>: SQLite 持久化（<code>data/checkpoints.db</code>），进程重启后断点续传</li>
+<li><strong>LLM 退避重试</strong>: 指数退避 max 3 次（1s → 2s → 4s）</li>
+<li><strong>MCP 调用超时</strong>: 10s timeout 保护（<code>amap_wrapper.py</code>）</li>
+<li><strong>记忆去重</strong>: 连续相同记录跳过写入</li>
+<li><strong>SSE 取消传播</strong>: 客户端断开后后台线程感知取消信号</li>
+<li>总计 ~200 行新增，零删除</li>
+</ul>
+<h3 id="_11">并发优化（已落地）</h3>
+<p>三处独立任务从串行改并行，无需应用层锁——<code>MCPTool.run()</code> 每次调用内部新建独立 event loop + MCPClient 连接，无共享 mutable state；<code>error_log</code> 由 <code>Annotated[list, add]</code> reducer 合并。</p>
+<ul>
+<li><strong>API 预处理并行</strong> (<code>app/api/trip.py</code>)：<code>_compute_intercity</code> ∥ <code>_fetch_weather</code> 用 <code>ThreadPoolExecutor</code> 同时提交；<code>/api/trip</code> 与 <code>/api/trip/stream</code> 两个端点一致改造。预处理耗时从 <code>t1 + t2</code> 变为 <code>max(t1, t2)</code></li>
+<li><strong>maps_geo 双查并行</strong> (<code>app/api/trip.py</code>)：<code>_compute_intercity</code> 内 origin/destination 地理编码同时提交，节省一次 MCP round-trip（~200-500ms）</li>
+<li><strong>LangGraph 拓扑 fan-out</strong> (<code>app/graph/builder.py</code>)：<code>START → [attraction, memory]</code> 并行入口 + planner 双入边 join。memory 是纯本地 JSON 读，与 attraction 的 LLM+MCP 长任务并行不阻塞；planner 自动等 hotel + memory 都到达</li>
+<li>端到端验证（上海→杭州 2 天）：<code>graph.invoke</code> 76.6s，final_plan 完整，<code>user_profile 加载: True</code> 直接证明 memory 边执行到位</li>
+</ul>
+<hr />
+<h2 id="_12">📁 项目结构</h2>
+<pre><code>tripplanner/
+├── README.md                    # 本文件
+├── PROJECT.md                   # 项目总文档（541 行）
+├── ARCHITECTURE.md              # 7 张 Mermaid 架构图
+├── plan/                        # Phase 1-7 计划 + 面试文档
+└── backend/
+    ├── app/
+    │   ├── agents/              # 4 SimpleAgent
+    │   ├── graph/               # 4 Node StateGraph + Conditional Edge
+    │   ├── tools/               # AmapToolWrapper + FallbackTool
+    │   ├── memory/              # 五因子 + 双轨异常检测
+    │   ├── api/                 # FastAPI + 城际交通预处理
+    │   ├── models/              # Pydantic 模型
+    │   └── services/            # MCP + LLM 单例
+    ├── static/index.html        # MVP 前端
+    ├── run.py                   # 一键启动
+    ├── .env.example             # 配置模板
+    ├── .gitignore
+    └── requirements.txt
+</code></pre>
+<hr />
+<h2 id="_13">🖥 前端功能</h2>
+<table>
+<thead>
+<tr>
+<th>功能</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>8 维度偏好标签</td>
+<td>景点/饮食/交通/节奏/住宿/预算/出行方式</td>
+</tr>
+<tr>
+<td>出行方式选择</td>
+<td>高铁/飞机/自驾</td>
+</tr>
+<tr>
+<td>用户画像面板</td>
+<td>0/5 渐进构建 → 5 次后展示 8 维画像</td>
+</tr>
+<tr>
+<td>降级列表面板</td>
+<td>实时展示各步骤的降级信息</td>
+</tr>
+<tr>
+<td>预算可视化</td>
+<td>堆叠条形图</td>
+</tr>
+<tr>
+<td>天气预报卡片</td>
+<td>7 日预报</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="license">📄 License</h2>
+<p>MIT</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 SuperGODOG
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.instant", "navigation.tracking", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

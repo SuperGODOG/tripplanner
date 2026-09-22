@@ -12,12 +12,14 @@ Wrapper 内部路径:
   params["type"]=="weather"   → MCP → format → validate（跳过 geo）
   params["type"]=="around"    → 新路径: maps_around_search（周边搜索，POI 无坐标需 geo 增强）
 """
-import json, re
+import json, re, math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from hello_agents.tools import Tool, ToolParameter
 from ..services.amap_service import get_amap_mcp_tool, run_mcp, geo_cached
+from ..services.poi_images import resolve_poi_image
 from ..models.candidates import PoiCandidate, HotelCandidate
+from ..services.cache_service import compute_fingerprint, get_cache_manager
 
 
 class AmapToolWrapper(Tool):
@@ -58,7 +60,7 @@ class AmapToolWrapper(Tool):
 
         # ── 第 1.5 层: 坐标增强（仅 POI 类，条件触发）──
         if stype in ("attraction", "hotel"):
-            raw = self._enrich_pois_with_coords(raw)
+            raw = self._enrich_pois_with_coords(raw, city=city, stype=stype)
 
         # ── 第 2 层: 格式化 ──
         formatted = self._format(raw, stype)
@@ -72,7 +74,7 @@ class AmapToolWrapper(Tool):
 
     def search_pois(self, city: str, stype: str, keywords: str = "",
                     center: str = "", radius: str = "",
-                    max_results: int = 10) -> list[PoiCandidate]:
+                    max_results: int = 20) -> list[PoiCandidate]:
         """返回结构化候选列表，坐标/来源/价格全程字段化。
 
         stype: attraction / hotel / around / food
@@ -80,10 +82,10 @@ class AmapToolWrapper(Tool):
         - food:   around 的别名，默认 radius=500（景点周边美食软推荐）
         """
         raw = self._call_mcp(city, stype, keywords, center, radius)
-        # maps_around_search / maps_text_search 的 POI 均无 location 字段，
-        # 必须按地址 maps_geo 增强坐标，否则候选全部因缺坐标被丢弃
+        # maps_around_search / maps_text_search 的 POI 优先经 maps_search_detail 补全原生坐标与元数据，
+        # 兜底按地址 maps_geo 增强坐标（带 city 前缀防跨省漂移）
         if stype in ("attraction", "hotel", "around", "food"):
-            raw = self._enrich_pois_with_coords(raw)
+            raw = self._enrich_pois_with_coords(raw, city=city, stype=stype)
         data = self._extract_json(raw)
         pois = data.get("pois", []) if isinstance(data, dict) else []
         if not pois:
@@ -122,22 +124,52 @@ class AmapToolWrapper(Tool):
             except ValueError:
                 price = None
 
+        raw_rating = poi.get("rating")
+        if not raw_rating and isinstance(poi.get("biz_ext"), dict):
+            raw_rating = poi.get("biz_ext", {}).get("rating")
+        rating_val = None
+        if raw_rating:
+            try:
+                rating_val = round(float(str(raw_rating).strip()), 1)
+            except Exception:
+                rating_val = str(raw_rating).strip()
+
+        cat = str(poi.get("type", "") or "")
+        tcode = str(poi.get("typecode", "") or "")
+
+        # 提取高德丰富返回值 (营业时间、商圈/景区板块、景区评级、联系电话等)
+        open_time = str(poi.get("open_time") or poi.get("opentime2") or "")
+        b_area = poi.get("business_area", "")
+        if isinstance(b_area, list):
+            b_area = ", ".join(str(b) for b in b_area if b)
+        business_area = str(b_area or "")
+        level = str(poi.get("level") or "")
+        tel = str(poi.get("tel") or "")
+        photos = poi.get("photos", [])
+        image_url = resolve_poi_image(name, photos=photos, category=cat)
+
         common: dict[str, Any] = dict(
             name=name, lng=float(lng), lat=float(lat),
             address=str(poi.get("address", "") or ""),
             district=str(poi.get("adname", "") or ""),
-            category=str(poi.get("type", "") or ""),
+            category=cat,
+            typecode=tcode,
             price=price,
+            open_time=open_time,
+            business_area=business_area,
+            level=level,
+            tel=tel,
+            image_url=image_url,
         )
         if cls is HotelCandidate:
             htype = str(poi.get("type", "") or "").split(";")[-1]
             return HotelCandidate(
                 **common,
-                rating=str(poi.get("rating", "") or ""),
+                rating=str(raw_rating or ""),
                 price_range=str(poi.get("price_range", "") or ""),
                 hotel_type=htype,
             )
-        return PoiCandidate(**common)
+        return PoiCandidate(**common, rating=rating_val)
 
     # ================================================================
     # 第 1 层: MCP 调用
@@ -150,11 +182,11 @@ class AmapToolWrapper(Tool):
                 "arguments": {"city": city},
             })
         if stype in ("around", "food") and center:
-            default_radius = "500" if stype == "food" else "5000"
+            default_radius = "1500" if stype == "food" else "5000"
             return self._mcp_run_with_timeout({
                 "action": "call_tool", "tool_name": "maps_around_search",
                 "arguments": {"location": center,
-                              "keywords": kw or ("美食" if stype == "food" else "酒店"),
+                              "keywords": kw or ("特色美食|地道老字号|知名餐厅" if stype == "food" else "酒店"),
                               "radius": radius or default_radius},
             })
         return self._mcp_run_with_timeout({
@@ -174,8 +206,10 @@ class AmapToolWrapper(Tool):
     # 第 1.5 层: 坐标增强
     # ================================================================
 
-    def _enrich_pois_with_coords(self, raw: Any) -> dict:
-        """对 POI 列表中的每个结果并发调 maps_geo，注入经纬度"""
+    def _enrich_pois_with_coords(self, raw: Any, city: str = "", stype: str = "") -> dict:
+        """对 POI 列表中的每个结果并发调 maps_search_detail (优先) 或 maps_geo (兜底)，注入高精度坐标与富元数据。
+        实施多重防漂移防线，杜绝坐标被篡改至外省或台湾/汉中。
+        """
         data = self._extract_json(raw)
         if not data:
             return raw
@@ -184,16 +218,116 @@ class AmapToolWrapper(Tool):
         if not pois:
             return data
 
-        def geo_poi(poi):
-            addr = poi.get("address", "") or poi.get("name", "")
-            coord = geo_cached(addr)  # LRU 缓存 + 全局池限流
-            if coord:
-                poi["_lng"], poi["_lat"] = coord
+        city_coord = geo_cached(city) if city else None
+
+        def _calc_dist(lng1, lat1, lng2, lat2) -> float:
+            R = 6371.0
+            dlat = math.radians(lat2 - lat1)
+            dlng = math.radians(lng2 - lng1)
+            a = (math.sin(dlat / 2) ** 2 +
+                 math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+                 math.sin(dlng / 2) ** 2)
+            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        def enrich_poi(item: tuple[int, dict]) -> dict:
+            idx, poi = item
+            # 0. 优先尝试从原始 search 结果的 location 字段解析（高德原生经纬度，最权威）
+            orig_loc = str(poi.get("location", "") or "")
+            if orig_loc and "," in orig_loc:
+                try:
+                    p_lng, p_lat = (float(v) for v in orig_loc.split(","))
+                    poi["_lng"], poi["_lat"] = p_lng, p_lat
+                except ValueError:
+                    pass
+
+            # 1. 优先调用 maps_search_detail：由 POI ID 唯一定位，获取官方精准经纬度、评分、营业时间、商圈与评级
+            poi_id = poi.get("id")
+            if poi_id:
+                cached_detail = None
+                try:
+                    cache_mgr = get_cache_manager()
+                    fp = compute_fingerprint({"id": poi_id})
+                    cached_detail = cache_mgr.get("maps_search_detail", fp)
+                except Exception:
+                    cached_detail = None
+
+                detail_data = None
+                if cached_detail and isinstance(cached_detail, dict):
+                    detail_data = cached_detail
+                else:
+                    # 缓存未命中时：
+                    # - food/around：已从 search 得到经纬度与评分，不额外消耗高德网络配额
+                    # - attraction/hotel：若已有原生经纬度，仅对前 5 个发起 detail 请求，其余复用 search 结果
+                    # - 缺失经纬度时：发起请求以补齐坐标
+                    should_fetch = (poi.get("_lng") is None or poi.get("_lat") is None) or (stype not in ("food", "around") and idx < 5)
+                    if should_fetch:
+                        try:
+                            detail_res = self._mcp_run_with_timeout({
+                                "action": "call_tool", "tool_name": "maps_search_detail",
+                                "arguments": {"id": poi_id},
+                            }, timeout=5)
+                            detail_data = self._extract_json(detail_res)
+                        except Exception:
+                            pass
+
+                if isinstance(detail_data, dict):
+                    loc = detail_data.get("location")
+                    if loc and "," in str(loc):
+                        try:
+                            p_lng, p_lat = (float(v) for v in str(loc).split(","))
+                            poi["_lng"], poi["_lat"] = p_lng, p_lat
+                            poi["location"] = str(loc)
+                        except ValueError:
+                            pass
+                    if detail_data.get("address"):
+                        poi["address"] = detail_data["address"]
+                    if detail_data.get("rating"):
+                        poi["rating"] = detail_data["rating"]
+                    if detail_data.get("open_time"):
+                        poi["open_time"] = detail_data["open_time"]
+                    if detail_data.get("opentime2"):
+                        poi["opentime2"] = detail_data["opentime2"]
+                    if detail_data.get("level"):
+                        poi["level"] = detail_data["level"]
+                    if detail_data.get("cost"):
+                        poi["cost"] = detail_data["cost"]
+                    if detail_data.get("business_area"):
+                        poi["business_area"] = detail_data["business_area"]
+                    if detail_data.get("city"):
+                        poi["adname"] = detail_data["city"]
+
+            # 2. 回退到 maps_geo：仅在完全缺失经纬度时尝试按地址地理编码，且必须传 city
+            if poi.get("_lng") is None or poi.get("_lat") is None:
+                addr = poi.get("address", "") or poi.get("name", "")
+                coord = geo_cached(addr, city=city)
+                if coord:
+                    poi["_lng"], poi["_lat"] = coord
+
+            # 3. 严格地理围栏兜底：若解析出的坐标距离目标城市中心 > 120km（判定为跨省漂移），坚决丢弃外省漂移坐标
+            if city_coord and poi.get("_lng") is not None and poi.get("_lat") is not None:
+                dist = _calc_dist(poi["_lng"], poi["_lat"], city_coord[0], city_coord[1])
+                if dist > 120.0:
+                    # 尝试恢复原始 orig_loc（若原始坐标处于合理围栏内）
+                    recovered = False
+                    if orig_loc and "," in orig_loc:
+                        try:
+                            o_lng, o_lat = (float(v) for v in orig_loc.split(","))
+                            if _calc_dist(o_lng, o_lat, city_coord[0], city_coord[1]) <= 120.0:
+                                poi["_lng"], poi["_lat"] = o_lng, o_lat
+                                poi["location"] = orig_loc
+                                recovered = True
+                        except Exception:
+                            pass
+                    if not recovered:
+                        poi["_lng"], poi["_lat"] = None, None
             return poi
 
-        futures = [self._executor.submit(geo_poi, p) for p in pois[:10]]
+        futures = [self._executor.submit(enrich_poi, (idx, p)) for idx, p in enumerate(pois[:25])]
         for f in as_completed(futures):
-            f.result()
+            try:
+                f.result()
+            except Exception:
+                pass
 
         return data
 
