@@ -37,6 +37,8 @@ class ChatRequest(BaseModel):
     action_type: str | None = None  # "SET_SLOT" | "RESUME" | None
     action_payload: dict[str, Any] | None = None  # 如 {"key": "city", "value": "北京"}
     engine: str | None = None  # 兼容保留字段: "harness" (独占生产引擎) | "langgraph" (已废弃并自动接管)
+    strategy: str = "pipeline"  # "pipeline" (确定性运筹管线) | "react" (Pi风格大模型动态工具调用)
+
 
 
 class InterruptRequest(BaseModel):
@@ -79,6 +81,7 @@ async def session_chat(request: ChatRequest, x_engine: str | None = Header(None)
                 action_type=request.action_type,
                 action_payload=request.action_payload,
                 cancellation_token=abort_event,
+                strategy=request.strategy,
             ):
                 if event.event_type == "message_delta":
                     yield _format_sse("message", {"content": event.payload.get("delta", "")})

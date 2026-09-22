@@ -35,6 +35,8 @@ class HarnessChatRequest(BaseModel):
     action_type: str | None = Field(default=None, description="操作类型 (如 SET_SLOT / RESUME)")
     action_payload: dict[str, Any] | None = Field(default=None, description="操作载荷 (如选项卡点击)")
     requirements: dict[str, Any] | None = Field(default=None, description="已有生效需求（可选）")
+    strategy: str = Field(default="pipeline", description="规划调度模式: pipeline (运筹硬约束管线) | react (Pi风格自主动态工具调用)")
+
 
 
 class HarnessInterruptRequest(BaseModel):
@@ -88,6 +90,7 @@ async def harness_stream_chat(request: HarnessChatRequest):
                 action_type=request.action_type,
                 action_payload=request.action_payload,
                 cancellation_token=abort_event,
+                strategy=request.strategy,
             ):
                 yield _format_sse_event(event.event_type, event.to_sse_dict())
         except asyncio.CancelledError:

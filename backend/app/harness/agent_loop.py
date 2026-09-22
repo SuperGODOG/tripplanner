@@ -42,11 +42,19 @@ logger = logging.getLogger(__name__)
 
 
 class TravelAgentHarness:
-    """旅行规划专属 Agent Harness"""
+    """旅行规划专属 Agent Harness (支持 Pipeline 运筹管线与 ReAct 自主动态工具调用双模式)"""
 
-    def __init__(self, registry: ToolRegistry = travel_tools, max_turns: int = 4):
+    def __init__(
+        self,
+        registry: ToolRegistry = travel_tools,
+        max_turns: int = 4,
+        strategy: str = "pipeline",  # "pipeline" | "react"
+        llm: Any | None = None,
+    ):
         self.registry = registry
         self.max_turns = max_turns
+        self.strategy = strategy
+        self.llm = llm
 
     async def run(
         self,
@@ -58,6 +66,7 @@ class TravelAgentHarness:
         action_payload: dict[str, Any] | None = None,
         cancellation_token: asyncio.Event | None = None,
         is_steering: bool = False,
+        strategy: str | None = None,
     ) -> AsyncGenerator[HarnessEvent, None]:
         """运行单轮 Harness 主循环 (产出强类型异步事件流，支持中途改口抢占与协作取消)"""
         def _is_preempted() -> bool:
@@ -168,6 +177,25 @@ class TravelAgentHarness:
             action="FLY_TO",
             data={"city": city, "center": center_lng_lat, "zoom": zoom_lvl, "title": f"定位至目的地【{resolved_dest.canonical_name}】"}
         )
+
+        # ── 调度策略分流：支持 Pipeline 运筹管线与 ReAct 大模型自主动态工具调用 ──
+        active_strategy = (strategy or self.strategy or "pipeline").lower()
+        if active_strategy == "react":
+            from .react_loop import AutonomousReActHarness
+            react_harness = AutonomousReActHarness(
+                registry=self.registry,
+                llm=self.llm,
+                max_steps=8,
+            )
+            async for ev in react_harness.run(
+                session_id=session_id,
+                user_input=user_input,
+                user_id=user_id,
+                requirements=req,
+                cancellation_token=cancellation_token,
+            ):
+                yield ev
+            return
 
         turn = 0
         final_plan: dict[str, Any] = {}

@@ -80,9 +80,42 @@ def test_mutate_itinerary_plan_recalc_and_2opt():
     # 故宫国庆实名预约预警自动核验触发
     assert "reservation_alert" in day0["attractions"][1]
 
+    # 2. 2-opt 空间自愈模式测试 (mode="2opt")
+    # 构造故意绕路交错的次序: 天坛(南) -> 颐和园(西北) -> 故宫(中) -> 圆明园(西北)
+    crisscross_days = [
+        {
+            "day_index": 0,
+            "date": "2026-10-01",
+            "attractions": [
+                {"name": "天坛公园", "lng": 116.411, "lat": 39.882, "price": 34.0},
+                {"name": "颐和园", "lng": 116.273, "lat": 39.999, "price": 30.0},
+                {"name": "故宫博物院", "lng": 116.397, "lat": 39.918, "price": 60.0},
+                {"name": "圆明园", "lng": 116.299, "lat": 40.008, "price": 25.0},
+            ],
+        }
+    ]
+
+    # recalc 保持绕路次序
+    res_raw = mutate_itinerary_plan(base_plan, crisscross_days, mode="recalc")
+    dist_recalc = res_raw["days"][0]["telemetry"]["total_distance_km"]
+
+    # 2opt 空间自愈解除交叉绕路
+    res_2opt = mutate_itinerary_plan(base_plan, crisscross_days, mode="2opt")
+    assert res_2opt["version_id"] == 2
+    day0_2opt = res_2opt["days"][0]
+    names_2opt = [a["name"] for a in day0_2opt["attractions"]]
+    dist_2opt = day0_2opt["telemetry"]["total_distance_km"]
+
+    # 验证 2-Opt 成功优化了路径并消除了严重交叉，总里程严格减少
+    assert dist_2opt < dist_recalc
+    # 验证地理相近的颐和园与圆明园被排在一起 (相邻)
+    yhy_idx = names_2opt.index("颐和园")
+    ymy_idx = names_2opt.index("圆明园")
+    assert abs(yhy_idx - ymy_idx) == 1
+
 
 def test_mutate_itinerary_api_endpoint():
-    """测试 POST /api/session/mutate_itinerary 接口"""
+    """测试 POST /api/session/mutate_itinerary 接口 (支持 recalc 与 2opt)"""
     client = TestClient(app)
     session_id = "test-mutate-session-001"
 
@@ -131,3 +164,28 @@ def test_mutate_itinerary_api_endpoint():
     day0 = data["updated_plan"]["days"][0]
     assert day0["attractions"][0]["name"] == "北海公园"
     assert day0["attractions"][0]["image_url"] != ""
+
+    # 测试 2opt API 请求模式
+    payload_2opt = {
+        "session_id": session_id,
+        "user_id": "test_user",
+        "days": [
+            {
+                "day_index": 0,
+                "date": "2026-10-02",
+                "attractions": [
+                    {"name": "天坛公园", "lng": 116.411, "lat": 39.882, "price": 34.0},
+                    {"name": "颐和园", "lng": 116.273, "lat": 39.999, "price": 30.0},
+                    {"name": "故宫博物院", "lng": 116.397, "lat": 39.918, "price": 60.0},
+                ],
+            }
+        ],
+        "mode": "2opt",
+    }
+    resp_2opt = client.post("/api/session/mutate_itinerary", json=payload_2opt, headers={"X-User-Id": "test_user"})
+    assert resp_2opt.status_code == 200
+    data_2opt = resp_2opt.json()
+    assert data_2opt["status"] == "success"
+    assert data_2opt["updated_plan"]["version_id"] == 3
+    assert len(data_2opt["updated_plan"]["days"][0]["attractions"]) == 3
+

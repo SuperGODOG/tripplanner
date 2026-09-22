@@ -1281,18 +1281,22 @@ function initSortable() {
 
         if (!sourceDay || !targetDay) return
 
+        // 1. 保存快照以支持失败原子回滚
+        const rollbackSnapshot = JSON.parse(JSON.stringify(currentPlan.value.days))
+
         const [movedAttr] = sourceDay.attractions.splice(oldIndex, 1)
         targetDay.attractions.splice(newIndex, 0, movedAttr)
 
-        await mutateItinerary('recalc')
+        await mutateItinerary('recalc', null, rollbackSnapshot)
       }
     })
     sortableInstances.push(sortable)
   })
 }
 
-async function mutateItinerary(mode = 'recalc', targetDayIdx = null) {
+async function mutateItinerary(mode = 'recalc', targetDayIdx = null, rollbackSnapshot = null) {
   if (!currentPlan.value || !currentPlan.value.days) return
+  const fallbackDays = rollbackSnapshot || JSON.parse(JSON.stringify(currentPlan.value.days))
   isMutatingItinerary.value = true
   if (targetDayIdx !== null) {
     mutatingDayIndex.value = targetDayIdx
@@ -1319,6 +1323,10 @@ async function mutateItinerary(mode = 'recalc', targetDayIdx = null) {
 
     if (!res.ok) {
       console.warn('行程画板突变自愈异常', res.statusText)
+      if (fallbackDays) {
+        currentPlan.value.days = fallbackDays
+      }
+      alert('行程排序同步异常，已恢复上一版本')
       return
     }
 
@@ -1326,9 +1334,18 @@ async function mutateItinerary(mode = 'recalc', targetDayIdx = null) {
     if (data.status === 'success' && data.updated_plan) {
       currentPlan.value = data.updated_plan
       saveSessionCache()
+    } else {
+      if (fallbackDays) {
+        currentPlan.value.days = fallbackDays
+      }
+      alert(data.detail || '行程调整失败，已恢复上一版本')
     }
   } catch (err) {
     console.error('行程拖拽突变保存失败:', err)
+    if (fallbackDays) {
+      currentPlan.value.days = fallbackDays
+    }
+    alert('网络异常，行程拖拽未能成功保存，已恢复上一版本')
   } finally {
     isMutatingItinerary.value = false
     mutatingDayIndex.value = null
