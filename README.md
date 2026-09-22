@@ -22,7 +22,7 @@
 [![Core Engine](https://img.shields.io/badge/Core%20Engine-Sovereign%20Harness%20v5.0-00F0FF?style=for-the-badge&logo=speedtest&logoColor=black)](backend/app/harness/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%20|%20Vite-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Redis](https://img.shields.io/badge/Redis-Cache%20Layer%201-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
-[![Test Suite](https://img.shields.io/badge/Tests-169%20PASSED%20%7C%20100%25-00FF66?style=for-the-badge&logo=pytest&logoColor=black)](backend/tests/)
+[![Test Suite](https://img.shields.io/badge/Tests-206%20PASSED%20%7C%20100%25-00FF66?style=for-the-badge&logo=pytest&logoColor=black)](backend/tests/)
 [![Thermal Impact](https://img.shields.io/badge/CPU%20Impact-0.1%25%20Idle-7928CA?style=for-the-badge&logo=apple&logoColor=white)](status.sh)
 [![E2E Latency](https://img.shields.io/badge/Latency-0.78s%20E2E-FF0055?style=for-the-badge&logo=speedtest&logoColor=white)](scripts/benchmark_comparison.py)
 
@@ -30,9 +30,9 @@
 
 | 🌐 SYSTEM HUD MATRIX | TELEMETRY SPECIFICATION | OPERATIONAL STATUS |
 | :--- | :---: | :---: |
-| **SCHEDULER ENGINE** | `Sovereign Travel Harness v5.0 (Pi-Style Single Loop)` | `⚡ ACTIVE (PRODUCTION)` |
+| **SCHEDULER ENGINE** | `Sovereign Travel Harness v5.0 (Domain-Specific Pipeline + Self-Healing Loop)` | `⚡ ACTIVE (PRODUCTION)` |
 | **LEGACY FRAMEWORK** | `LangGraph Session Machine (Completely Decoupled)` | `🛑 RETIRED (ARCHIVED)` |
-| **TEST VALIDATION** | `169 / 169 Automated Suites (12-D Boundary Resilience)` | `✅ 100% GREEN (2.70s)` |
+| **TEST VALIDATION** | `206 / 206 Automated Suites (12-D Boundary Resilience & Invariants)` | `✅ 100% GREEN` |
 | **LATENCY PERFORMANCE** | `0.78s E2E Stream / 23.5ms Fingerprint Cache Hit` | `🚀 530.2x SPEEDUP` |
 | **HARDWARE THERMAL** | `0.1% CPU Standby / FSEvents Zero Recursive Storm` | `❄️ ULTRA COLD (0.0W)` |
 
@@ -74,7 +74,7 @@ flowchart TB
         UI["Vue 3.5 + Vite 响应式工作台<br/>实时 SSE 流式脉冲 · 4ms 交互澄清卡片 · 拓扑地图渲染<br/>⚡ Sovereign Harness (0.75s 极速内核独占)"]:::client
     end
 
-    subgraph CORE_HARNESS["✦ 生产独占主脑：Sovereign Travel Harness (Pi-Style 单主循环极简内核)"]
+    subgraph CORE_HARNESS["✦ 生产独占主脑：Sovereign Travel Harness (领域确定性编排 + 空间自愈内核)"]
         direction TB
         LOOP["TravelAgentHarness 异步主循环<br/>run(session_id, user_input, action_type)"]:::harness
         STORE["HarnessSessionStore<br/>纯内存线程安全原子三轨快照 (Lock 保护)"]:::harness
@@ -214,7 +214,7 @@ flowchart TB
 | 🔄 **一键热重载重启** | `make restart` | 依次执行安全停机与快速拉起，用于密钥或配置文件热更新生效 |
 | 📊 **全组件健康度巡检** | `make status` | 动态输出 Redis、FastAPI、Vite、持久化数据库文件大小与孤儿进程健康雷达 |
 | 📜 **前后端滚动实时日志** | `make logs` | 终端多路复用并行输出 `backend/server.log` 与 `frontend/dev.log` |
-| 🧪 **自动化测试全量回归** | `make test` | 快速执行全量 169 项测试（含 12 维极端边界与容错测试，2.70s 全绿） |
+| 🧪 **自动化测试全量回归** | `make test` | 快速执行全量 206 项测试（含 12 维极端边界、中途改口与不变式自愈容错测试，100% 全绿） |
 | 🏎️ **基准压测对比看板** | `make benchmark` | 一键执行 Harness vs LangGraph 真实端到端时延基准压测对比 |
 | 📦 **前端极速生产构建** | `make build` | Vite 极速构建前端生产资产包至 `dist/`（149ms 零告警） |
 | 💬 **终端端到端模拟规划** | `make chat` | 向本地后端直接发起真实成都 3 天行程的流式规划请求并输出脉冲 |
@@ -282,43 +282,50 @@ make test
 ============================= test session starts ==============================
 platform darwin -- Python 3.13.5, pytest-9.1.1, pluggy-1.6.0
 rootdir: /Users/caoruixin/Desktop/project/tripplanner
-collected 169 items                                                            
+collected 206 items
 
 backend/tests/test_algorithm_rigorous_proof.py .....                     [  2%]
 backend/tests/test_anthropic_ark_llm.py ...                              [  4%]
-backend/tests/test_attraction_node.py ......                             [  8%]
+backend/tests/test_attraction_node.py ......                             [  7%]
+backend/tests/test_calendar_export.py ....                               [  9%]
 backend/tests/test_candidates.py ........                                [ 13%]
 backend/tests/test_context_compaction.py ...                             [ 14%]
 backend/tests/test_enrich_meals.py ...                                   [ 16%]
-backend/tests/test_guide_rag.py ..........                               [ 22%]
-backend/tests/test_harness_api_integration.py ..                         [ 23%]
-backend/tests/test_harness_boundary.py ............                      [ 30%]
+backend/tests/test_geo_entity_and_cache_boundary.py .......               [ 19%]
+backend/tests/test_guide_rag.py ..........                               [ 24%]
+backend/tests/test_harness_api_integration.py ..                         [ 25%]
+backend/tests/test_harness_boundary.py ............                      [ 31%]
 backend/tests/test_harness_multiturn.py ....                             [ 33%]
-backend/tests/test_hotel_selection.py .....                              [ 36%]
-backend/tests/test_isolation.py ....                                     [ 38%]
-backend/tests/test_parse_plan.py ......                                  [ 42%]
-backend/tests/test_phase1_models_and_memory.py ......                    [ 45%]
-backend/tests/test_phase2_deterministic_tools.py ......                  [ 49%]
-backend/tests/test_phase3_dual_rag_tools.py .......                      [ 53%]
-backend/tests/test_phase4_fingerprint_cache.py ......                    [ 56%]
-backend/tests/test_phase5_agent_orchestration.py ......                  [ 60%]
-backend/tests/test_phase6_streaming_api.py ......                        [ 63%]
-backend/tests/test_phase8_core_refactor.py ......                        [ 67%]
-backend/tests/test_planner_retry.py ......                               [ 71%]
-backend/tests/test_poi_enrichment_and_food_distance.py .....             [ 73%]
-backend/tests/test_profile_constraints.py ...                            [ 75%]
-backend/tests/test_request_context.py .                                  [ 76%]
-backend/tests/test_scenic_poi_pipeline.py ....                           [ 78%]
-backend/tests/test_session_persistence.py ...                            [ 80%]
-backend/tests/test_tavily_rag.py ......                                  [ 84%]
-backend/tests/test_time_window_and_monday_optimization.py .....          [ 86%]
-backend/tests/test_travel_harness.py .....                               [ 89%]
-backend/tests/test_trip_request.py ...                                   [ 91%]
-backend/tests/test_validate.py .....                                     [ 94%]
-backend/tests/test_weather_and_itinerary_enrichment.py .....             [ 97%]
+backend/tests/test_hotel_selection.py .....                              [ 35%]
+backend/tests/test_isolation.py ....                                     [ 37%]
+backend/tests/test_itinerary_mutation_and_visual.py ......                [ 40%]
+backend/tests/test_lifestyle_memory.py .....                             [ 43%]
+backend/tests/test_midturn_steering.py ......                            [ 46%]
+backend/tests/test_multitenant_and_footprint.py .....                    [ 48%]
+backend/tests/test_parse_plan.py ......                                  [ 51%]
+backend/tests/test_phase1_models_and_memory.py ......                    [ 54%]
+backend/tests/test_phase2_deterministic_tools.py ......                  [ 57%]
+backend/tests/test_phase3_dual_rag_tools.py .......                      [ 60%]
+backend/tests/test_phase4_fingerprint_cache.py ......                    [ 63%]
+backend/tests/test_phase5_agent_orchestration.py ......                  [ 66%]
+backend/tests/test_phase6_streaming_api.py ......                        [ 69%]
+backend/tests/test_phase8_core_refactor.py ......                        [ 72%]
+backend/tests/test_planner_retry.py ......                               [ 75%]
+backend/tests/test_poi_enrichment_and_food_distance.py .....             [ 77%]
+backend/tests/test_profile_constraints.py ...                            [ 79%]
+backend/tests/test_request_context.py .                                  [ 80%]
+backend/tests/test_reservation_policy.py ......                          [ 83%]
+backend/tests/test_scenic_poi_pipeline.py ......                         [ 85%]
+backend/tests/test_session_persistence.py ...                            [ 87%]
+backend/tests/test_tavily_rag.py ......                                  [ 90%]
+backend/tests/test_time_window_and_monday_optimization.py .....          [ 92%]
+backend/tests/test_travel_harness.py ......                              [ 95%]
+backend/tests/test_trip_request.py ...                                   [ 97%]
+backend/tests/test_validate.py .....                                     [ 99%]
+backend/tests/test_weather_and_itinerary_enrichment.py .....             [ 99%]
 backend/tests/test_zero_hardcode_poi.py ....                             [100%]
 
-====================== 169 passed, 0 failed in 2.70s ===========================
+====================== 206 passed, 0 failed in 16.68s ==========================
 ```
 
 ### 关键防线白盒捕获事实
@@ -342,11 +349,11 @@ tripplanner/
 │   ├── app/
 │   │   ├── api/                    # 路由网关 (session.py 独占 Sovereign Harness 流式 SSE)
 │   │   ├── harness/                # ⚡ Sovereign Travel Harness 生产主脑内核
-│   │   │   ├── agent_loop.py       # Pi-Style 极简异步主循环生成器
+│   │   │   ├── agent_loop.py       # 领域确定性异步主循环生成器 (不变式断言与自愈)
 │   │   │   ├── events.py           # 强类型事件生命周期协议
-│   │   │   ├── session_store.py    # 纯内存原子三轨快照持久化
+│   │   │   ├── session_store.py    # 纯内存原子三轨快照 (进程内原子状态与改口热继承)
 │   │   │   ├── invariants.py       # 领域不变式规则审计与闭环自愈
-│   │   │   └── registry.py         # 确定性工具注册调度中心
+│   │   │   └── registry.py         # 确定性工具注册调度中心 (支持非阻塞线程卸载与超时)
 │   │   ├── graph/                  # 🛑 [已退役废案] LangGraph 状态机拓扑 (仅供历史学术参考)
 │   │   ├── services/               # 确定性底层核心
 │   │   │   ├── amap_native.py      # 原生进程内高德连接池 (零子进程开销)
@@ -361,7 +368,7 @@ tripplanner/
 │   │   │   └── cache_decorator.py  # 声明式指纹缓存装饰器
 │   │   ├── memory/                 # SQLite 租户画像、上下文压缩器
 │   │   └── agents/                 # 主动澄清 Agent、自愈修复 Agent、单天文案 Agent
-│   └── tests/                      # 169 项全量自动化测试阵列 (含 12 维极端边界与容错测试，2.70s 极速全绿)
+│   └── tests/                      # 206 项全量自动化测试阵列 (含 12 维极端边界与中途改口自愈测试，全绿)
 │
 ├── frontend/                       # 前端 Cyberpunk 视界终端
 │   ├── src/
@@ -382,7 +389,7 @@ tripplanner/
 v1.0 (Master Zero)   v2.0 (Deterministic)   v3.0 (Parallel Graph)   v4.0 (Sovereign Matrix)   v5.0 (Sovereign Harness)
 ──────────────────   ────────────────────   ─────────────────────   ───────────────────────   ────────────────────────
 ReAct 循环试错       确定性空间算法重构     Send API 动态分日扇出   双重防线 Web RAG 免疫     LangGraph 彻底退居废案
-3+ 次盲目环境感知    引入高德 API 候选过滤  K-Means++ 拓扑互斥      原生进程内连接池          Pi-Style 单主循环极速内核
+3+ 次盲目环境感知    引入高德 API 候选过滤  K-Means++ 拓扑互斥      原生进程内连接池          领域确定性单主循环自愈内核
 时延 20s+ / 易幻觉   时延减半 / 稳定性提升  并行时延 ≈ 单日计算     Redis 亚毫秒指纹缓存      ⚡ 0.78s 交付 / 缓存 23.5ms
 ```
 

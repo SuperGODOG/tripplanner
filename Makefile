@@ -8,7 +8,7 @@ help:
 	@echo "  make restart   - 重启系统服务"
 	@echo "  make status    - 查看全组件运行健康度与指标巡检看板"
 	@echo "  make logs      - 实时跟踪前后端日志输出"
-	@echo "  make test      - 运行全量 201 项自动化测试 (含 Harness 极端边界与容错测试)"
+	@echo "  make test      - 运行全量 206 项自动化测试 (含 Harness 极端边界与容错测试)"
 	@echo "  make benchmark - 运行 Harness vs LangGraph 自动化性能基准压测对比"
 	@echo "  make build     - 构建前端生产包 (Vite Build)"
 	@echo "  make chat      - 发起一次真实端到端对话规划请求"

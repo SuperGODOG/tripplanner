@@ -27,6 +27,7 @@ from .events import (
     MapActionEvent,
     TurnCompleteEvent,
     PreemptedEvent,
+    ExecutionFailedEvent,
 )
 from .invariants import TravelInvariants
 from .registry import ToolRegistry, travel_tools
@@ -580,6 +581,43 @@ class TravelAgentHarness:
 
             final_plan = current_candidate_plan
             break
+
+        # ── 失败出口防御：若重试耗尽且仍存在未恢复的违规，严禁广播空 plan 并报告 success=True ──
+        if not final_plan:
+            prev_snapshot = harness_session_store.get(session_id, user_id=user_id)
+            retained_plan = prev_snapshot.current_plan if prev_snapshot else None
+            active_violations = violations if "violations" in locals() and violations else ["多次自愈重试后仍未满足旅行硬约束"]
+
+            fail_detail = f"自愈重试已达上限 ({self.max_turns} 轮)，仍未能满足预算或时间硬约束条件"
+            yield ExecutionFailedEvent(
+                session_id=session_id,
+                reason="invariant_violations_exhausted",
+                violations=active_violations,
+                detail=fail_detail,
+                retained_previous_plan=bool(retained_plan),
+            )
+
+            fail_md = (
+                f"### ⚠️ 规划遇到约束冲突\n\n"
+                f"系统在尝试 {self.max_turns} 轮自动自愈调整后，仍无法在当前预算/天数限制下完成无冲突规划。"
+                f"建议适当放宽预算限制或调整出行天数。"
+            )
+            if retained_plan:
+                fail_md += "\n\n> ℹ️ 已为您保留上一版有效行程方案。"
+
+            harness_session_store.update(
+                session_id=session_id,
+                user_id=user_id,
+                requirements=req,
+                current_plan=retained_plan or {},
+                locked_items=locked_items,
+                new_user_message=user_input,
+                new_assistant_message=fail_md,
+                pending_clarification=None,
+            )
+            yield MessageDeltaEvent(delta=fail_md)
+            yield TurnCompleteEvent(session_id=session_id, success=False, status="failed")
+            return
 
         # ── Step 5: 广播行程版本与文本分块 ──
         yield PlanVersionEvent(plan=final_plan)

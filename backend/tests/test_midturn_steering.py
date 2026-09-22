@@ -16,7 +16,13 @@ from fastapi.testclient import TestClient
 from app.api.main import app
 from app.harness.agent_loop import TravelAgentHarness
 from app.harness.coordinator import HarnessExecutionCoordinator, execution_coordinator
-from app.harness.events import PreemptedEvent, ThinkingEvent, PlanVersionEvent
+from app.harness.events import (
+    PreemptedEvent,
+    ThinkingEvent,
+    PlanVersionEvent,
+    ExecutionFailedEvent,
+    TurnCompleteEvent,
+)
 from app.harness.registry import ToolRegistry
 from app.harness.session_store import harness_session_store
 from app.models.session import EffectiveRequirements, SlotOrigin
@@ -220,3 +226,97 @@ async def test_slot_inheritance_across_steering():
     new_plan = plan_events[0].payload["plan"]
     assert new_plan["city"] == "杭州"
     assert len(new_plan["days"]) == 3  # 继承了 3 天！
+
+
+@pytest.mark.asyncio
+async def test_harness_exhausted_retries_emits_failure():
+    """5. 验证约束自愈重试耗尽时，严禁广播空计划，严格发出 ExecutionFailedEvent 并标记 success=False"""
+    mock_reg = ToolRegistry()
+
+    @mock_reg.register("search_scenic_pois", "mock")
+    def _m1(city, preferences=None):
+        return [
+            {"name": f"{city}景点1", "lng": 120.15, "lat": 30.25, "category": "自然", "typecode": "110000", "price": 100},
+        ]
+
+    @mock_reg.register("cluster_days_kmeans", "mock")
+    def _m2(pois, days):
+        return [{"day_index": 0, "pois": pois}]
+
+    @mock_reg.register("select_minimax_hotel", "mock")
+    def _m3(city, attraction_coords):
+        return {"hotel_selected": {"name": "豪华度假酒店", "lng": 120.12, "lat": 30.25, "price": 5000}}
+
+    @mock_reg.register("solve_2opt_route", "mock")
+    def _m4(pois):
+        class Res:
+            route = [{"name": p["name"], "distance_km": 1.0, "poi": p} for p in pois]
+            total_ticket = 100.0
+        return Res()
+
+    @mock_reg.register("enrich_meals", "mock")
+    def _m5(plan_days, city, food_preferences=None):
+        # 故意不填充三餐，导致 TravelInvariants 永远报错违背不变式 4
+        return plan_days
+
+    harness = TravelAgentHarness(registry=mock_reg, max_turns=2)
+    sess_id = "sess_exhausted_retries_test"
+    user_id = "test_user_exhaust"
+
+    events = []
+    async for ev in harness.run(
+        session_id=sess_id,
+        user_input="2026-10-01去杭州玩1天，预算50块",
+        user_id=user_id,
+    ):
+        events.append(ev)
+
+    # 验证产生 ExecutionFailedEvent
+    fail_events = [e for e in events if isinstance(e, ExecutionFailedEvent)]
+    assert len(fail_events) == 1
+    assert fail_events[0].payload["reason"] == "invariant_violations_exhausted"
+    assert len(fail_events[0].payload["violations"]) > 0
+
+    # 验证不产生 PlanVersionEvent (不广播空计划)
+    plan_events = [e for e in events if isinstance(e, PlanVersionEvent)]
+    assert len(plan_events) == 0
+
+    # 验证 TurnCompleteEvent 明确报告 success=False 与 status="failed"
+    turn_complete_events = [e for e in events if isinstance(e, TurnCompleteEvent)]
+    assert len(turn_complete_events) == 1
+    assert turn_complete_events[0].payload["success"] is False
+    assert turn_complete_events[0].payload["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_to_thread_and_timeout():
+    """6. 验证 ToolRegistry 自动将同步耗时函数卸载至工作线程，并支持超时打断控制"""
+    import threading
+    import time
+
+    reg = ToolRegistry()
+    main_thread_id = threading.get_ident()
+    worker_thread_ids = []
+
+    @reg.register("sync_blocking_calc", "同步密集型测试工具")
+    def sync_calc(val: int):
+        worker_thread_ids.append(threading.get_ident())
+        time.sleep(0.05)
+        return val * 2
+
+    @reg.register("slow_hanging_tool", "模拟卡死或慢速外部接口")
+    def slow_tool():
+        time.sleep(0.5)
+        return "finished"
+
+    # 验证非阻塞：执行线程应为工作线程，与主事件循环线程不同
+    res, dur = await reg.call("sync_blocking_calc", val=21)
+    assert res == 42
+    assert dur >= 40.0
+    assert len(worker_thread_ids) == 1
+    assert worker_thread_ids[0] != main_thread_id
+
+    # 验证超时机制
+    with pytest.raises(asyncio.TimeoutError):
+        await reg.call("slow_hanging_tool", timeout=0.05)
+

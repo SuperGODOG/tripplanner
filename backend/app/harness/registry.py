@@ -31,13 +31,21 @@ class ToolDefinition:
         self.description = description
         self.func = func
 
-    async def execute(self, **kwargs: Any) -> Any:
+    async def execute(self, timeout: float | None = None, **kwargs: Any) -> tuple[Any, float]:
         start_t = time.perf_counter()
-        if asyncio.iscoroutinefunction(self.func):
-            res = await self.func(**kwargs)
+
+        async def _run():
+            if asyncio.iscoroutinefunction(self.func):
+                return await self.func(**kwargs)
+            # 卸载同步工具至工作线程，杜绝阻塞主事件循环，保障中途取消与流式心跳及时响应
+            return await asyncio.to_thread(self.func, **kwargs)
+
+        if timeout and timeout > 0:
+            res = await asyncio.wait_for(_run(), timeout=timeout)
         else:
-            res = self.func(**kwargs)
-        duration_ms = (time.perf_counter() - start_t) * 1000
+            res = await _run()
+
+        duration_ms = round((time.perf_counter() - start_t) * 1000, 1)
         return res, duration_ms
 
 
@@ -56,11 +64,13 @@ class ToolRegistry:
     def get_tool(self, name: str) -> ToolDefinition | None:
         return self._registry.get(name)
 
-    async def call(self, name: str, **kwargs: Any) -> tuple[Any, float]:
+    async def call(self, name: str, timeout: float | None = None, **kwargs: Any) -> tuple[Any, float]:
         tool = self.get_tool(name)
         if not tool:
             raise KeyError(f"Tool {name} 未在注册中心注册")
-        return await tool.execute(**kwargs)
+        # 允许从 kwargs 中传递 timeout
+        actual_timeout = timeout or kwargs.pop("timeout", None)
+        return await tool.execute(timeout=actual_timeout, **kwargs)
 
     def list_tools(self) -> list[dict[str, str]]:
         return [

@@ -145,3 +145,20 @@ class PreemptedEvent(HarnessEvent):
                 "detail": detail or "用户发起中途改口，当前流式计算已安全抢占中断并清理上下文",
             }
         )
+
+
+@dataclass
+class ExecutionFailedEvent(HarnessEvent):
+    """规划执行失败事件（重试耗尽、严重违规或未恢复的异常）"""
+    def __init__(self, session_id: str, reason: str, violations: list[str] | None = None, detail: str = "", retained_previous_plan: bool = False):
+        super().__init__(
+            event_type="execution_failed",
+            payload={
+                "session_id": session_id,
+                "reason": reason,
+                "violations": violations or [],
+                "detail": detail,
+                "retained_previous_plan": retained_previous_plan,
+            }
+        )
+

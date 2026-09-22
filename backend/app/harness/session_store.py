@@ -32,7 +32,13 @@ class HarnessSessionSnapshot(BaseModel):
 
 
 class HarnessSessionStore:
-    """线程安全的内存+持久化会话存储引擎 (支持严格多租户数据隔离与属主鉴权)"""
+    """线程安全的内存原子会话存储引擎 (支持严格多租户数据隔离与属主鉴权)
+
+    架构与产品边界说明 (Product Boundary):
+    1. 本存储引擎定位于同一进程内的极速原子快照，支持对话轮次间的高性能状态继承、中途改口与版本回溯。
+    2. 存储数据驻留于进程内存字典中，服务重启后状态不予恢复（并非跨进程持久化断点恢复系统）。
+    3. 目标城市地理实体解析、高德 POI 检索与天气数据由外部 Redis Layer-1 承担持久化指纹缓存 (TTL=7~30天)。
+    """
 
     def __init__(self, max_entries: int = 500, max_entries_per_user: int = 20):
         self._store: dict[str, HarnessSessionSnapshot] = {}
